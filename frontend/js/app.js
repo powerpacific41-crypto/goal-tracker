@@ -314,6 +314,28 @@
     view.innerHTML = placeholder(item ? item.label : 'Not found', PHASE_FOR[route] || 'a later phase');
   }
 
+  /* --- installing the app on a phone --- */
+  let installEvent = null;
+  window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvent = e; if (state.user && currentRoute() === 'profile') render(); });
+  window.addEventListener('appinstalled', () => { installEvent = null; toast('App installed. Open it from your home screen.', 'success'); if (state.user) render(); });
+  const isStandalone = () => (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+  function installCard() {
+    if (isStandalone()) return '<section class="panel section"><h2>Installed</h2><p class="muted">You are using the installed app.</p></section>';
+    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const how = installEvent
+      ? '<button class="btn primary" type="button" data-action="install">Install on this phone</button>'
+      : ios
+        ? '<ol class="muted" style="margin:8px 0 0;padding-left:20px"><li>Open this page in <strong>Safari</strong>.</li><li>Tap the <strong>Share</strong> button.</li><li>Choose <strong>Add to Home Screen</strong>, then <strong>Add</strong>.</li></ol>'
+        : '<p class="muted">In Chrome, open the <strong>⋮ menu</strong> and choose <strong>Install app</strong> (or <strong>Add to Home screen</strong>).</p>';
+    return `<section class="panel section"><h2>Install on your phone</h2><p class="muted">Opens full screen from your home screen, like any other app.</p>${how}</section>`;
+  }
+  async function doInstall() {
+    if (!installEvent) return;
+    installEvent.prompt();
+    try { await installEvent.userChoice; } catch (e) { /* ignored */ }
+    installEvent = null; render();
+  }
+
   /* --- profile --- */
   async function renderProfile(view) {
     const u = state.user;
@@ -329,6 +351,7 @@
           <dt>Last login</dt><dd>${esc(fmtDate(u.lastLogin))}</dd>
         </dl>
       </section>
+      ${installCard()}
       <section class="panel section">
         <h2>Change password</h2>
         <p class="muted">Changing it signs you out on your other devices.</p>
@@ -523,6 +546,7 @@
       const a = b.dataset.action;
       if (a === 'logout') logout();
       else if (a === 'unlink-google') unlinkGoogle();
+      else if (a === 'install') doInstall();
       else if (a === 'reset') resetUser(b.dataset.id);
       else if (a === 'toggle') toggleUser(b.dataset.id, b.dataset.status);
     });
