@@ -1,53 +1,47 @@
-// Game layer UI (Phase 3): quest board, goals, arena (partners, duels, crowns), trophies.
-// All points, levels and results come from the server; this file only shows them.
+// Phase 6 screens: Today, Leaderboard, Partners (accountability) and Reviews (admin).
+// Also shares the photo-completion flow with the calendar (window.GT.ui.completeTask).
+// Every point and rule comes from the server; this file only shows it.
 (function () {
   const { esc, toast, state } = window.GT;
   const $ = (s) => document.querySelector(s);
 
-  const PRESETS = {
-    health: ['Drink 2L water', 'Sleep by 11pm', 'Eat a healthy meal'],
-    fitness: ['Workout', 'Walk 10k steps', 'Stretch 10 min'],
-    learning: ['Read 20 pages', 'Study session', 'Practice a language'],
-    career: ['Deep work block', 'Learn a new skill', 'Reach out to someone'],
-    finance: ['Log expenses', 'No-spend day', 'Move money to savings'],
-    mind: ['Meditate', 'Journal', 'Screen-free hour'],
-    relationships: ['Call family', 'Quality time', 'Send a kind message'],
-    creative: ['Write', 'Draw', 'Practice an instrument'],
-    home: ['Tidy up', 'Cook at home', 'Declutter one thing'],
-    others: []
+  const AREAS = {
+    health: ['🥗', 'Health'], social: ['🎉', 'Social'], family: ['👨‍👩‍👧', 'Family'], career: ['💼', 'Career'],
+    spiritual: ['🕊️', 'Spiritual'], finance: ['💰', 'Finance & Wealth']
   };
+  const areaIcon = (k) => (AREAS[k] || ['✨'])[0];
+  const areaName = (k) => (AREAS[k] || [0, k])[1];
   const EV = {
-    completion: ['⭐', 'Quest completed'], verified: ['✅', 'Verified by partner'], referee: ['🧑‍⚖️', 'Reviewed a photo'],
-    perfect_day: ['✨', 'Perfect Day'], flagged: ['⚠️', 'Photo not accepted'], achievement: ['🏅', 'Achievement'],
-    crown: ['👑', 'Weekly crown'], duo: ['🤝', 'Duo quest'], cheer: ['📣', 'Cheered a partner']
+    task: ['✅', 'Task completed'], missed: ['⏰', 'Missed task'], bonus_week: ['📅', 'Weekly 100%'],
+    bonus_month: ['🗓️', 'Monthly 100%'], bonus_goal: ['🏆', 'Goal 100%']
   };
 
-  let token = 0;            // cancels stale renders when the user navigates away
-  let cache = { quests: [], arena: null, areas: [] };
-  let wired = false;
+  let token = 0, wired = false;
+  const S = { today: null, partnerId: null, partnerData: null, boardPeriod: 'all', selected: {}, filter: '' };
 
-  const areaIcon = (key) => ((cache.areas.find((a) => a.key === key) || {}).icon || '✨');
-  const num = (n) => Number(n || 0).toLocaleString();
-  const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30) || 'others';
+  const fmtPts = (n) => { const v = Math.round(Number(n || 0) * 100) / 100; return (v > 0 ? '+' : '') + v.toLocaleString(); };
+  const pts = (n) => (Math.round(Number(n || 0) * 100) / 100).toLocaleString();
   function dayLabel(key) {
     const d = new Date(key + 'T12:00:00');
     return isNaN(d.getTime()) ? key : d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
   }
-  function loading(view) { view.innerHTML = '<p class="loading"><span class="spinner"></span> Loading…</p>'; }
-  function failure(view, e) { view.innerHTML = `<section class="panel"><p class="status bad">${esc(e.message)}</p></section>`; }
+  const loading = (view) => { view.innerHTML = '<p class="loading"><span class="spinner"></span> Loading…</p>'; };
+  const failure = (view, e) => { view.innerHTML = `<section class="panel"><p class="status bad">${esc(e.message)}</p><button class="btn" type="button" data-g="reload">Try again</button></section>`; };
+  const pad = (n) => (n < 10 ? '0' : '') + n;
 
-  /* ---------- modal, confetti ---------- */
+  /* ---------- modal (bottom sheet on phones), confetti ---------- */
   function openModal(html, opts) {
     const wrap = document.createElement('div');
     wrap.className = 'modal-backdrop';
     wrap.innerHTML = `<div class="modal" role="dialog" aria-modal="true">${html}</div>`;
     document.body.appendChild(wrap);
-    const api = {
-      el: wrap.firstElementChild,
-      set(h) { wrap.firstElementChild.innerHTML = h; },
-      close() { wrap.remove(); document.removeEventListener('keydown', onKey); }
-    };
+    document.body.classList.add('modal-open');
     const dismissible = !opts || opts.dismissible !== false;
+    const api = {
+      el: wrap.firstElementChild, wrap,
+      set(h) { wrap.firstElementChild.innerHTML = h; },
+      close() { wrap.remove(); document.removeEventListener('keydown', onKey); if (!document.querySelector('.modal-backdrop')) document.body.classList.remove('modal-open'); }
+    };
     const onKey = (e) => { if (e.key === 'Escape' && dismissible) api.close(); };
     if (dismissible) {
       document.addEventListener('keydown', onKey);
@@ -61,155 +55,71 @@
     const colors = ['#e8a317', '#1f8a5b', '#0f3d4c', '#e4572e', '#7b5ea7', '#2e9cca'];
     const box = document.createElement('div');
     box.className = 'confetti';
-    for (let i = 0; i < 46; i++) {
+    for (let i = 0; i < 40; i++) {
       const p = document.createElement('i');
       p.style.left = Math.random() * 100 + '%';
       p.style.background = colors[i % colors.length];
       p.style.animationDelay = Math.random() * 0.5 + 's';
       p.style.animationDuration = 1.8 + Math.random() * 1.4 + 's';
-      p.style.transform = 'rotate(' + Math.random() * 360 + 'deg)';
       box.appendChild(p);
     }
     document.body.appendChild(box);
     setTimeout(() => box.remove(), 3600);
   }
 
-  function achievementCards(list) {
-    return list.map((a) => `<div class="ach-pop"><span class="ach-ico">${esc(a.icon)}</span>
-      <div><strong>${esc(a.name)}</strong><br><span class="muted">${esc(a.desc)}</span></div>
-      <span class="pts">+${a.bonus}</span></div>`).join('');
+  function ask(title, text, yes, opts) {
+    return new Promise((resolve) => {
+      const m = openModal(`<h3 class="modal-title">${esc(title)}</h3><p>${esc(text)}</p>
+        ${opts && opts.input ? `<div class="field"><label for="ask-in">${esc(opts.input)}</label><textarea id="ask-in" rows="3" maxlength="${opts.max || 200}" placeholder="${esc(opts.placeholder || '')}"></textarea></div>
+        <p class="form-error" id="ask-err" role="alert"></p>` : ''}
+        <div class="modal-actions"><button class="btn" data-m="no" type="button">Cancel</button>
+        <button class="btn ${opts && opts.danger === false ? 'primary' : 'danger'}" data-m="yes" type="button">${esc(yes)}</button></div>`, { dismissible: true });
+      let done = false;
+      m.wrap.addEventListener('click', (e) => { if (e.target === m.wrap && !done) { done = true; resolve(null); } });
+      m.el.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-m]');
+        if (!b) return;
+        if (b.dataset.m === 'no') { done = true; m.close(); return resolve(null); }
+        const val = opts && opts.input ? ($('#ask-in').value || '').trim() : '';
+        if (opts && opts.input && opts.required && val.length < 3) { $('#ask-err').textContent = 'Please write a short reason.'; return; }
+        done = true; m.close(); resolve({ value: val });
+      });
+    });
   }
 
-  function showAchievements(list) {
-    if (!list || !list.length) return;
-    confetti();
-    const m = openModal(`<h3 class="modal-title">🏅 Achievement${list.length > 1 ? 's' : ''} unlocked!</h3>
-      ${achievementCards(list)}<div class="modal-actions"><button class="btn primary" data-m="ok">Nice!</button></div>`);
-    m.el.addEventListener('click', (e) => { if (e.target.closest('[data-m=ok]')) m.close(); });
-  }
+  /* ================================================================ */
+  /* Completing a task (shared with the calendar)                     */
+  /* ================================================================ */
+  const ruleText = (p) => (p.rule === 'floating' ? `floating +${Math.round((state.rules ? state.rules.floating : 0.5) * 100)}%` : p.rule === 'locked' ? 'last day, no bonus' : '');
 
-  /* ---------- shared pieces ---------- */
-  function heroCard(h) {
-    const span = Math.max(1, h.next - h.floor);
-    return `<section class="hero">
-      <div class="hero-top">
-        <div class="avatar" aria-hidden="true">${esc(h.icon)}<span class="lvl">${h.level}</span></div>
-        <div class="hero-id">
-          <div class="hero-name">${esc(h.name)}</div>
-          <div class="hero-title">Level ${h.level} · ${esc(h.title)}</div>
-        </div>
-      </div>
-      <div class="xp" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${h.pct}"><i style="width:${h.pct}%"></i></div>
-      <div class="xp-note">${num(h.score - h.floor)} / ${num(span)} to Level ${h.level + 1}</div>
-      <div class="chips">
-        <span class="chip" title="Current streak">🔥 ${h.streak} day${h.streak === 1 ? '' : 's'}</span>
-        <span class="chip" title="Total points">⭐ ${num(h.points)}</span>
-        <span class="chip" title="Days you were active">📅 ${h.activeDays}</span>
-        <span class="chip" title="Weekly crowns">👑 ${h.crowns}</span>
-        <span class="chip" title="This week">⚡ ${num(h.weekPoints)} this week</span>
-      </div>
-    </section>`;
-  }
-
-  function sourceBadge(src) {
-    return src === 'live' ? '<span class="badge live">● Live camera</span>' : '<span class="badge warn">Camera app</span>';
-  }
-  function statusBadge(s) {
-    if (s === 'verified') return '<span class="badge ok">✅ Verified</span>';
-    if (s === 'flagged') return '<span class="badge off">⚠️ Not accepted</span>';
-    return '<span class="badge">Waiting for review</span>';
-  }
-
-  /* ---------- router ---------- */
-  function render(route, view) {
-    wire(view);
-    token++;
-    if (route === 'dashboard') return renderHome(view, token);
-    if (route === 'goals') return renderGoals(view, token);
-    if (route === 'arena') return renderArena(view, token);
-    if (route === 'trophies') return renderTrophies(view, token);
-  }
-
-  /* ================= HOME: quest board ================= */
-  async function renderHome(view, t) {
-    loading(view);
-    let d;
-    try { d = await Api.call('game.home'); } catch (e) { if (t === token) failure(view, e); return; }
-    if (t !== token) return;
-    cache.quests = d.quests; cache.areas = d.areas;
-
-    const todo = d.quests.filter((q) => !q.doneToday && !q.locked).length;
-    const banners = [];
-    if (d.incomingInvites) banners.push(`<a class="banner-link" href="#/arena">🤝 You have ${d.incomingInvites} partner invite${d.incomingInvites > 1 ? 's' : ''} waiting →</a>`);
-    if (d.unseenCheers) banners.push(`<a class="banner-link" href="#/arena">💌 ${d.unseenCheers} new cheer${d.unseenCheers > 1 ? 's' : ''} from your partner →</a>`);
-
-    const duels = d.duels.map((x) => {
-      const lead = x.me === x.them ? 'Tied' : (x.me > x.them ? `You lead by ${x.me - x.them}` : `${esc(x.partner)} leads by ${x.them - x.me}`);
-      return `<a class="duel-strip" href="#/arena"><span>⚔️ You <strong>${num(x.me)}</strong> vs ${esc(x.partner)} <strong>${num(x.them)}</strong></span><span class="muted">${lead} · ${x.daysLeft}d left</span></a>`;
-    }).join('');
-
-    const dayBar = d.dailyTotal >= 2
-      ? `<div class="daybar"><div><strong>${d.dailyDone}/${d.dailyTotal}</strong> daily quests · Perfect Day <strong>+${d.perfectBonus}</strong></div>
-         <div class="mini"><i style="width:${Math.round(d.dailyDone / d.dailyTotal * 100)}%"></i></div></div>` : '';
-
-    view.innerHTML = `
-      ${heroCard(d.hero)}
-      ${banners.join('')}
-      ${duels}
-      <section class="panel section">
-        <h2>Today's quests</h2>
-        <p class="muted">${d.quests.length ? (todo ? `${todo} to go. Each one needs a live photo as proof.` : 'All done for today. Great work!') : 'No quests yet.'}</p>
-        ${dayBar}
-        ${d.quests.length ? `<ul class="quests">${d.quests.map(questRow).join('')}</ul>` : `
-          <div class="empty-mini"><p>Create a goal and add activities to start earning points.</p>
-          <a class="btn primary" href="#/goals">Set up my first goal</a></div>`}
-      </section>`;
-    showAchievements(d.newAchievements);
-  }
-
-  function questRow(q) {
-    const freq = q.frequencyType === 'weekly' ? `${q.doneWeek}/${q.target} this week` : 'Daily';
-    let right;
-    if (q.doneToday) right = '<span class="done-tag">✓ Done</span>';
-    else if (q.locked) right = '<span class="done-tag soft">Week target met</span>';
-    else right = `<button class="btn primary q-btn" type="button" data-g="complete" data-id="${esc(q.activityId)}">📸 +${q.points}</button>`;
-    return `<li class="quest ${q.doneToday ? 'done' : ''} ${q.locked ? 'locked' : ''}">
-      <span class="q-icon">${areaIcon(q.areaKey)}</span>
-      <div class="q-main"><strong>${esc(q.name)}</strong><span class="muted">${esc(q.goalTitle)} · ${esc(freq)}</span></div>
-      ${right}</li>`;
-  }
-
-  /* ---- completing a quest ---- */
-  async function startComplete(id, btn) {
-    const q = cache.quests.find((x) => x.activityId === id);
-    if (!q) return;
-    btn.disabled = true;
+  async function completeTask(task, done) {
     try {
-      const begin = await Api.call('completions.begin', { activityId: id });
+      const begin = await Api.call('completions.begin', { instanceId: task.id });
       const info = { code: begin.code, who: state.user.name, title: begin.activityName };
       const photo = await Camera.capture(info);
-      const res = await reviewAndSubmit(photo, q, begin, info);
-      celebrate(res);
-      renderHome($('#view'), ++token);
+      const res = await reviewAndSubmit(photo, task, begin, info);
+      celebrate(res, task);
+      if (done) await done(res);
     } catch (e) {
       if (e.code !== 'CANCELLED') toast(e.message, 'error');
-    } finally { btn.disabled = false; }
+    }
   }
 
-  function reviewAndSubmit(first, q, begin, info) {
+  function reviewAndSubmit(first, task, begin, info) {
     return new Promise((resolve, reject) => {
       let photo = first;
+      const total = begin.points ? begin.points.total : 0;
       const m = openModal('', { dismissible: false });
       const paint = (err) => m.set(`
-        <h3 class="modal-title">Looking good?</h3>
+        <h3 class="modal-title">Complete “${esc(task.name)}”</h3>
         <img class="shot" src="${photo.previewUrl}" alt="Your photo with the live watermark">
-        <p class="hint">${photo.source === 'live' ? 'Your partner will see the LIVE watermark and code <strong>' + esc(begin.code) + '</strong>.' : 'Taken with your camera app. Your partner will see it labelled as such.'}</p>
+        <p class="hint">${photo.source === 'live' ? 'Your partners will see the LIVE watermark and code <strong>' + esc(begin.code) + '</strong>.' : 'Taken with your camera app. Your partners will see it labelled as such.'}</p>
         <div class="field"><label for="g-note">Note (optional)</label><input id="g-note" maxlength="200" placeholder="How did it go?"></div>
         <p class="form-error" role="alert">${esc(err || '')}</p>
-        <div class="modal-actions">
-          <button class="btn" type="button" data-m="cancel">Cancel</button>
-          <button class="btn" type="button" data-m="retake">Retake</button>
-          <button class="btn primary" type="button" data-m="send">Submit +${q.points}</button>
+        <div class="modal-actions stack-sm">
+          <button class="btn primary" type="button" data-m="send">Submit · ${fmtPts(total)}</button>
+          <button class="btn" type="button" data-m="retake">Retake photo</button>
+          <button class="btn link" type="button" data-m="cancel">Cancel</button>
         </div>`);
       paint();
       m.el.addEventListener('click', async (e) => {
@@ -217,9 +127,9 @@
         if (!b) return;
         if (b.dataset.m === 'cancel') { m.close(); reject(Camera.cancelled()); }
         else if (b.dataset.m === 'retake') {
-          m.el.parentElement.hidden = true;
+          m.wrap.hidden = true;
           try { photo = await Camera.capture(info); } catch (err) { if (err.code !== 'CANCELLED') toast(err.message, 'error'); }
-          m.el.parentElement.hidden = false;
+          m.wrap.hidden = false;
           paint();
         } else if (b.dataset.m === 'send') {
           const note = ($('#g-note') || {}).value || '';
@@ -227,13 +137,12 @@
           b.textContent = 'Saving…';
           try {
             const res = await Api.call('completions.submit', {
-              activityId: q.activityId, code: begin.code, notes: note,
+              instanceId: task.id, code: begin.code, notes: note,
               photo: { base64: photo.base64, mime: photo.mime, takenAt: photo.takenAt, source: photo.source }
             });
-            m.close();
-            resolve(res);
+            m.close(); resolve(res);
           } catch (err) {
-            if (['BAD_CODE', 'CODE_EXPIRED', 'NOT_ALLOWED'].indexOf(err.code) !== -1) { m.close(); reject(err); }
+            if (['BAD_CODE', 'CODE_EXPIRED', 'NOT_ALLOWED', 'NOT_FOUND'].indexOf(err.code) !== -1) { m.close(); reject(err); }
             else paint(err.message);
           }
         }
@@ -241,354 +150,406 @@
     });
   }
 
-  function celebrate(res) {
-    confetti();
-    const up = res.levelAfter > res.levelBefore;
-    const h = res.hero;
+  function celebrate(res, task) {
+    if (res.breakdown.length > 1) confetti();
     const m = openModal(`
-      ${up ? `<div class="levelup">⬆️ LEVEL UP!<br><span>Level ${h.level} · ${esc(h.title)} ${esc(h.icon)}</span></div>` : ''}
-      <div class="earned">+${res.earned}<small>points</small></div>
-      <ul class="breakdown">${res.breakdown.map((b, i) => `<li style="animation-delay:${i * 0.12}s"><span>${esc(b.label)}</span><strong>+${b.points}</strong></li>`).join('')}</ul>
-      <div class="xp"><i style="width:${h.pct}%"></i></div>
-      <div class="xp-note">Level ${h.level} · ${num(h.score - h.floor)} / ${num(Math.max(1, h.next - h.floor))} to Level ${h.level + 1}</div>
-      ${res.newAchievements.length ? `<h4 class="modal-sub">🏅 Achievements unlocked</h4>${achievementCards(res.newAchievements)}` : ''}
-      <p class="hint center">Your partner can now review your photo for bonus points.</p>
-      <div class="modal-actions"><button class="btn primary" data-m="ok">Awesome!</button></div>`);
+      <div class="earned">${fmtPts(res.earned)}<small>points</small></div>
+      <p class="center"><strong>${esc(task.name)}</strong> is done${res.taskStatus === 'floating' ? ' <span class="badge ok">floating bonus</span>' : ''}.</p>
+      <ul class="breakdown">${res.breakdown.map((b, i) => `<li style="animation-delay:${i * 0.12}s"><span>${esc(b.label)}</span><strong>${fmtPts(b.points)}</strong></li>`).join('')}</ul>
+      ${res.note ? `<p class="hint center">${esc(res.note)}</p>` : ''}
+      <p class="hint center">Your partners can now check your photo. Total: <strong>${pts(res.totalPoints)}</strong></p>
+      <div class="modal-actions"><button class="btn primary wide" data-m="ok" type="button">Nice!</button></div>`);
     m.el.addEventListener('click', (e) => { if (e.target.closest('[data-m=ok]')) m.close(); });
   }
 
-  /* ================= GOALS ================= */
-  async function renderGoals(view, t) {
+  window.GT.ui = { openModal, confetti, ask, completeTask, fmtPts, pts, areaIcon, areaName };
+
+  /* ================================================================ */
+  /* Router                                                           */
+  /* ================================================================ */
+  function render(route, view) {
+    wire(view);
+    token++;
+    if (route === 'today') return renderToday(view, token);
+    if (route === 'board') return renderBoard(view, token);
+    if (route === 'partners') return renderPartners(view, token);
+    if (route === 'reviews') return renderReviews(view, token);
+  }
+
+  /* ================================================================ */
+  /* TODAY                                                            */
+  /* ================================================================ */
+  function taskBadge(t) {
+    if (t.status === 'locked') return '<span class="tag lck">🔒 Last day</span>';
+    if (t.status === 'floating') return `<span class="tag flo">↪ Floating ${t.points.bonus ? '+' + t.points.bonus : ''}</span>`;
+    return '';
+  }
+
+  function taskRow(t, today) {
+    const sub = [esc(t.goalTitle), esc(areaName(t.areaKey)), t.frequency === 'weekly' ? 'weekly' : 'monthly'].join(' · ');
+    const late = t.assigned < today ? ` · planned ${esc(dayLabel(t.assigned))}` : '';
+    return `<li class="task ${t.status}">
+      <span class="q-icon">${areaIcon(t.areaKey)}</span>
+      <div class="q-main"><strong>${esc(t.name)}</strong><span class="muted">${sub}${late}</span>
+        <span class="tagrow">${taskBadge(t)}${t.status === 'locked' ? '<span class="muted tiny">Do it today or lose 5</span>' : ''}</span></div>
+      ${t.canComplete ? `<button class="btn primary t-btn" type="button" data-g="complete" data-id="${esc(t.id)}">📸<span>${fmtPts(t.points.total)}</span></button>` : ''}
+    </li>`;
+  }
+
+  function chanceBar(label, c) {
+    if (!c) return '';
+    const pct = c.total ? Math.round(c.done / c.total * 100) : 0;
+    return `<div class="chance"><div class="chance-top"><span>${label}</span><strong>${c.done}/${c.total}</strong><span class="bonus">${fmtPts(c.bonus)} bonus</span></div>
+      <div class="mini"><i style="width:${pct}%"></i></div></div>`;
+  }
+
+  async function renderToday(view, t) {
     loading(view);
     let d;
-    try { d = await Api.call('goals.list'); } catch (e) { if (t === token) failure(view, e); return; }
+    try { d = await Api.call('today.get'); } catch (e) { if (t === token) failure(view, e); return; }
     if (t !== token) return;
-    cache.areas = d.areas;
-    const areaOpts = d.areas.map((a) => `<option value="${a.key}">${a.icon} ${esc(a.label)}</option>`).join('');
+    S.today = d; state.rules = d.rules;
+    const R = d.rules;
+    const banners = [];
+    if (d.incomingInvites) banners.push(`<a class="banner-link" href="#/partners">🤝 ${d.incomingInvites} partner request${d.incomingInvites > 1 ? 's' : ''} waiting →</a>`);
+    if (d.reviewsWaiting) banners.push(`<a class="banner-link" href="#/reviews">🔎 ${d.reviewsWaiting} flagged task${d.reviewsWaiting > 1 ? 's' : ''} need a decision →</a>`);
 
-    view.innerHTML = `
-      <section class="panel section">
-        <h2>New goal</h2>
-        <p class="muted">A goal is the big thing. Activities inside it are the quests you complete.</p>
-        <form class="inline-form two" data-gform="goal" novalidate style="margin-top:14px">
-          <div class="field"><label for="g-title">Goal</label><input id="g-title" name="title" maxlength="80" placeholder="e.g. Get fit this year" required></div>
-          <div class="field"><label for="g-dur">Duration</label>
-            <select id="g-dur" name="durationMonths"><option value="1">1 month</option><option value="3" selected>3 months</option><option value="6">6 months</option><option value="12">12 months</option></select></div>
-          <button class="btn primary" type="submit">Create goal</button>
-        </form>
-        <p class="form-error" id="goal-error" role="alert"></p>
-      </section>
-      ${d.goals.length ? d.goals.map((g) => goalPanel(g, areaOpts, d.nameMax)).join('') : '<section class="panel empty"><p>No goals yet. Create your first one above.</p></section>'}`;
-    view.querySelectorAll('form[data-gform=activity]').forEach(fillPresets);
-  }
-
-  function goalPanel(g, areaOpts, nameMax) {
-    const acts = g.activities.length ? `<ul class="act-list">${g.activities.map((a) => `
-      <li><span class="q-icon">${areaIcon(a.areaKey)}</span>
-        <div class="q-main"><strong>${esc(a.name)}</strong><span class="muted">${a.frequencyType === 'weekly' ? a.target + '× per week' : 'Every day'}</span></div>
-        <button class="btn small" type="button" data-g="archive-act" data-id="${esc(a.activityId)}">Remove</button></li>`).join('')}</ul>`
-      : '<p class="muted">No activities yet. Add one below.</p>';
-    return `<section class="panel section">
-      <div class="goal-head"><div><h2>${esc(g.title)}</h2><p class="muted">Ends ${esc(dayLabel(g.endDate))}</p></div>
-        <button class="btn small danger" type="button" data-g="archive-goal" data-id="${esc(g.goalId)}">Archive</button></div>
-      ${acts}
-      <form class="act-form" data-gform="activity" data-goal="${esc(g.goalId)}" novalidate>
-        <h3>Add an activity</h3>
-        <div class="field"><label>Life area</label><select name="areaKey" data-g="area">${areaOpts}</select></div>
-        <div class="chips presets" data-presets></div>
-        <div class="field"><label>Activity name</label><input name="activityName" maxlength="${nameMax}" placeholder="What will you do?" required></div>
-        <div class="two-col">
-          <div class="field"><label>How often</label><select name="frequencyType" data-g="freq"><option value="daily">Every day</option><option value="weekly">Some days a week</option></select></div>
-          <div class="field" data-target hidden><label>Times per week</label><select name="target">${[1, 2, 3, 4, 5, 6, 7].map((n) => `<option value="${n}" ${n === 3 ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
-        </div>
-        <p class="form-error" role="alert"></p>
-        <button class="btn primary" type="submit">Add activity</button>
-      </form></section>`;
-  }
-
-  function fillPresets(form) {
-    const key = form.elements.areaKey.value;
-    form.querySelector('[data-presets]').innerHTML = (PRESETS[key] || [])
-      .map((p) => `<button type="button" class="chip btn-chip" data-g="preset" data-name="${esc(p)}">${esc(p)}</button>`).join('');
-  }
-
-  /* ================= ARENA ================= */
-  async function renderArena(view, t) {
-    loading(view);
-    let d, dir;
-    try {
-      [d, dir] = await Promise.all([Api.call('arena.get'), Api.call('users.directory')]);
-    } catch (e) { if (t === token) failure(view, e); return; }
-    if (t !== token) return;
-    cache.arena = d;
-
-    const inv = d.invites;
-    const taken = {};
-    inv.partners.concat(inv.incoming, inv.outgoing).forEach((x) => { taken[x.userId] = true; });
-    const pickable = dir.users.filter((u) => !taken[u.userId]);
-
-    const invites = inv.incoming.map((x) => `
-      <div class="row-card"><span>🤝 <strong>${esc(x.name)}</strong> wants to be your accountability partner</span>
-        <span class="row-actions"><button class="btn small primary" data-g="respond" data-id="${esc(x.partnershipId)}" data-accept="1">Accept</button>
-        <button class="btn small" data-g="respond" data-id="${esc(x.partnershipId)}" data-accept="0">Decline</button></span></div>`).join('')
-      + inv.outgoing.map((x) => `
-      <div class="row-card"><span>⏳ Waiting for <strong>${esc(x.name)}</strong> to accept</span>
-        <button class="btn small" data-g="revoke" data-id="${esc(x.partnershipId)}">Cancel</button></div>`).join('');
-
-    view.innerHTML = `
-      ${heroCard(d.hero)}
-      ${invites}
-      ${d.duels.length ? d.duels.map(duelCard).join('') : `
-        <section class="panel section"><h2>⚔️ The Arena</h2>
-          <p class="muted">Team up with someone you trust. Every week you duel for a 👑 crown, work on a duo quest together, and review each other's live photos.</p></section>`}
-      ${d.duels.length > 1 ? boardCard(d.board) : ''}
-      ${d.feed.length ? feedCard(d.feed) : ''}
-      <section class="panel section">
-        <h2>Find a partner</h2>
-        ${pickable.length ? `<form class="inline-form two" data-gform="invite" novalidate style="margin-top:12px">
-          <div class="field"><label for="inv-user">Choose someone</label>
-            <select id="inv-user" name="userId">${pickable.map((u) => `<option value="${esc(u.userId)}">${esc(u.name)} (${esc(u.userId)})</option>`).join('')}</select></div>
-          <button class="btn primary" type="submit">Send invite</button></form>
-          <p class="form-error" id="inv-error" role="alert"></p>`
-          : '<p class="muted">Nobody else is available to invite right now. Ask your admin to add your partner as a user.</p>'}
-        <p class="hint">Partners can see your quest photos and progress while you are partnered. Either of you can end it at any time.</p>
-      </section>
-      ${d.cheers.length ? `<section class="panel section"><h2>💌 Cheers for you</h2><ul class="cheer-list">${d.cheers.map((c) =>
-        `<li class="${c.isNew ? 'new' : ''}"><span class="cheer-emoji">${esc(c.emoji)}</span><span><strong>${esc(c.from)}</strong> ${c.kind === 'nudge' ? 'nudged you. Time for a quest!' : 'cheered you on'}</span></li>`).join('')}</ul></section>` : ''}
-      <section class="panel section">
-        <h2>How the Arena works</h2>
-        <ul class="rules">
-          <li>👑 <strong>Weekly crown:</strong> most points Monday to Sunday wins +${d.rules.crown}.</li>
-          <li>🤝 <strong>Duo quest:</strong> finish ${d.duels.length ? d.duels[0].duo.target : 20} quests together (at least ${d.duels.length ? d.duels[0].duo.minEach : 5} each) for +${d.rules.duo} each.</li>
-          <li>✅ <strong>Verify:</strong> when your partner approves your photo you get +${d.rules.verify}; they earn +${d.rules.referee} for reviewing.</li>
-          <li>⚠️ A photo that is not accepted takes its points back. Retake it with the live camera.</li>
-        </ul>
-      </section>`;
-    showAchievements(d.newAchievements);
-  }
-
-  function duelCard(x) {
-    const total = x.week.me + x.week.them;
-    const pct = total > 0 ? Math.round(Math.max(0, x.week.me) / total * 100) : 50;
-    const lead = x.week.me === x.week.them ? 'Dead heat!' : (x.week.me > x.week.them ? `You are ahead by ${x.week.me - x.week.them}` : `${esc(x.partner.name)} is ahead by ${x.week.them - x.week.me}`);
-    const duoPct = Math.min(100, Math.round(x.duo.combined / x.duo.target * 100));
-    const duoNote = x.duo.combined >= x.duo.target && x.duo.me >= x.duo.minEach && x.duo.them >= x.duo.minEach
-      ? '🎉 Reached! The bonus lands when the week ends.'
-      : `You ${x.duo.me} · ${esc(x.partner.name)} ${x.duo.them} (min ${x.duo.minEach} each)`;
-    return `<section class="panel section duel">
-      <div class="duel-head"><h2>⚔️ This week's duel</h2><span class="muted">${x.week.daysLeft === 0 ? 'Last day!' : x.week.daysLeft + ' days left'}</span></div>
-      <div class="versus">
-        <div class="side"><div class="avatar sm">${esc(cache.arena.hero.icon)}</div><strong>You</strong><span class="muted">Lv ${cache.arena.hero.level}</span><span class="crowns">👑 ${x.crowns.me}</span></div>
-        <div class="vs">VS</div>
-        <div class="side"><div class="avatar sm">${esc(x.partner.icon)}</div><strong>${esc(x.partner.name)}</strong><span class="muted">Lv ${x.partner.level} · 🔥 ${x.partner.streak}</span><span class="crowns">👑 ${x.crowns.them}</span></div>
-      </div>
-      <div class="scorebar" aria-label="Score split"><i style="width:${pct}%"></i></div>
-      <div class="scores"><strong>${num(x.week.me)}</strong><span class="muted">${lead}</span><strong>${num(x.week.them)}</strong></div>
-
-      <div class="duo"><div class="duo-top"><strong>🤝 Duo quest</strong><span>${x.duo.combined}/${x.duo.target}</span></div>
-        <div class="mini"><i style="width:${duoPct}%"></i></div><p class="hint">${duoNote}</p></div>
-
-      <div class="cheer-row" aria-label="Send a cheer">
-        ${cache.arena.cheerEmojis.map((e) => `<button type="button" class="emoji-btn" data-g="cheer" data-to="${esc(x.partner.userId)}" data-emoji="${esc(e)}" aria-label="Cheer ${esc(e)}">${esc(e)}</button>`).join('')}
-        <button type="button" class="btn small" data-g="nudge" data-to="${esc(x.partner.userId)}">👋 Nudge</button>
-      </div>
-      ${x.history.length ? `<div class="chips hist">${x.history.map((h) => `<span class="chip ${h.result}" title="${h.me} vs ${h.them}">${h.result === 'won' ? '👑' : (h.result === 'lost' ? '🥈' : '🤝')} ${esc(dayLabel(h.weekKey))} · ${h.me}–${h.them}${h.duo ? ' · 🤝' : ''}</span>`).join('')}</div>` : ''}
-      <div class="end-row"><button class="btn link" type="button" data-g="revoke" data-id="${esc(x.partnershipId)}">End partnership with ${esc(x.partner.name)}</button></div>
+    const hero = `<section class="hero today-hero">
+      <div class="hero-row"><div><div class="hero-name">Hi ${esc(d.name.split(' ')[0])} 👋</div><div class="hero-title">${esc(dayLabel(d.today))}</div></div>
+        <a class="score-pill" href="#/board" aria-label="Open leaderboard"><strong class="${d.points < 0 ? 'neg-on' : ''}">${pts(d.points)}</strong><span>points</span></a></div>
+      <div class="chips"><span class="chip">⚡ ${fmtPts(d.weekPoints)} this week</span><span class="chip">🎯 ${d.goalCount} goal${d.goalCount === 1 ? '' : 's'}</span></div>
     </section>`;
+
+    if (!d.goalCount) {
+      view.innerHTML = hero + banners.join('') + `<section class="panel empty"><h2>Start with a goal</h2>
+        <p>Pick your life areas and activities. The app schedules every task for you and keeps score.</p>
+        <a class="btn primary wide" href="#/goals">Create my first goal</a></section>` + rulesCard(R);
+      return;
+    }
+
+    const held = d.held.length ? `<section class="panel section hold-box"><h2>⏸ On hold</h2>
+      <p class="muted">A partner doubted ${d.held.length === 1 ? 'this task' : 'these tasks'}. No points until an admin decides.</p>
+      <ul class="tasks">${d.held.map((x) => `<li class="task held"><span class="q-icon">${areaIcon(x.areaKey)}</span>
+        <div class="q-main"><strong>${esc(x.name)}</strong><span class="muted">Flagged by ${esc(x.hold ? x.hold.by : '')}${x.hold && x.hold.reason ? ': “' + esc(x.hold.reason) + '”' : ''}</span></div></li>`).join('')}</ul></section>` : '';
+
+    const chances = d.chances.map((c) => `<div class="chance-goal"><h3>${esc(c.title)}</h3>${chanceBar('This week', c.week)}${chanceBar('This month', c.month)}${chanceBar('Whole goal', c.goal)}</div>`).join('');
+
+    view.innerHTML = `${hero}${banners.join('')}
+      <section class="panel section"><h2>Due today</h2>
+        <p class="muted">${d.due.length ? `${d.due.length} to do. Each one needs a live photo as proof.` : 'Nothing due. You are all caught up. 🎉'}</p>
+        ${d.due.length ? `<ul class="tasks">${d.due.map((x) => taskRow(x, d.today)).join('')}</ul>` : ''}
+      </section>
+      ${held}
+      ${d.doneToday.length ? `<section class="panel section"><h2>Done today</h2><ul class="tasks">${d.doneToday.map((x) => `<li class="task done"><span class="q-icon">${areaIcon(x.areaKey)}</span>
+        <div class="q-main"><strong>${esc(x.name)}</strong><span class="muted">${esc(x.goalTitle)}</span></div><span class="done-tag">${x.completionStatus === 'held' ? '⏸ Held' : '✓ ' + fmtPts(x.earned)}</span></li>`).join('')}</ul></section>` : ''}
+      <section class="panel section"><h2>Bonus chances</h2><p class="muted">Finish every task of the period to earn the bonus.</p>${chances}</section>
+      ${d.coming.length ? `<section class="panel section"><h2>Coming up</h2><ul class="tasks compact">${d.coming.map((x) => `<li class="task"><span class="q-icon">${areaIcon(x.areaKey)}</span>
+        <div class="q-main"><strong>${esc(x.name)}</strong><span class="muted">${esc(dayLabel(x.assigned))} · ${esc(x.goalTitle)}</span></div><span class="muted tiny">${fmtPts(x.points.total)}</span></li>`).join('')}</ul></section>` : ''}
+      ${rulesCard(R)}`;
   }
 
-  function boardCard(board) {
+  function rulesCard(R) {
+    const high = Object.keys(R.areaPoints).map((k) => areaName(k)).join(', ');
+    return `<details class="panel section rules-box"><summary>How points work</summary>
+      <ul class="rules">
+        <li>⭐ <strong>${esc(high)}</strong> tasks earn <strong>${R.areaPoints.health}</strong> points. Every other area earns <strong>${R.defaultPoints}</strong>.</li>
+        <li>↪ A <strong>floating</strong> task (moved from its planned day) earns <strong>+${Math.round(R.floating * 100)}%</strong>.</li>
+        <li>🔒 A <strong>locked</strong> task (its last allowed day) earns the base points, no bonus.</li>
+        <li>⏰ A task you do not complete costs <strong>${R.missed}</strong>. Your total can go below zero.</li>
+        <li>📅 100% of a week: <strong>+${R.week} × tasks</strong> · 🗓️ 100% of a month: <strong>+${R.month} × tasks</strong> · 🏆 100% of a goal: <strong>+${R.goal} × tasks</strong>.</li>
+        <li>⏸ A task a partner flags earns nothing until an admin approves it.</li>
+      </ul></details>`;
+  }
+
+  /* ================================================================ */
+  /* LEADERBOARD                                                      */
+  /* ================================================================ */
+  async function renderBoard(view, t) {
+    loading(view);
+    let d;
+    try { d = await Api.call('board.get', { period: S.boardPeriod }); } catch (e) { if (t === token) failure(view, e); return; }
+    if (t !== token) return;
     const medals = ['🥇', '🥈', '🥉'];
-    const top = Math.max(1, board[0].points);
-    return `<section class="panel section"><h2>🏁 Leaderboard · this week</h2><ol class="board">${board.map((b, i) => `
-      <li class="${b.isMe ? 'me' : ''}"><span class="rank">${medals[i] || (i + 1)}</span><span class="b-name">${esc(b.name)}${b.isMe ? ' (you)' : ''}</span>
-      <span class="b-bar"><i style="width:${Math.max(4, Math.round(Math.max(0, b.points) / top * 100))}%"></i></span><strong>${num(b.points)}</strong></li>`).join('')}</ol></section>`;
+    const seg = [['all', 'All time'], ['month', 'This month'], ['week', 'This week']].map((x) =>
+      `<button type="button" class="${S.boardPeriod === x[0] ? 'on' : ''}" data-g="period" data-v="${x[0]}" aria-pressed="${S.boardPeriod === x[0]}">${x[1]}</button>`).join('');
+    const me = d.me, p = me.parts;
+    const mine = `<section class="hero today-hero"><div class="hero-row"><div><div class="hero-title">${me.listed ? 'Your rank' : 'Not on the board yet'}</div>
+        <div class="hero-name">${me.listed ? '#' + me.rank + ' of ' + me.of : 'Create a goal to join'}</div></div>
+        <div class="score-pill static"><strong class="${me.points < 0 ? 'neg-on' : ''}">${pts(me.points)}</strong><span>points</span></div></div>
+      <div class="chips"><span class="chip">✅ ${fmtPts(p.tasks)} tasks</span><span class="chip">🎁 ${fmtPts(p.bonuses)} bonuses</span><span class="chip">⏰ ${fmtPts(p.penalties)} missed${p.missed ? ' (' + p.missed + ')' : ''}</span></div></section>`;
+    const top = Math.max(1, ...d.rows.map((r) => r.points));
+    const list = d.rows.length ? `<ol class="board">${d.rows.map((r) => `<li class="${r.isMe ? 'me' : ''}">
+        <span class="rank">${medals[r.rank - 1] || r.rank}</span>
+        <span class="b-name"><strong>${esc(r.name)}${r.isMe ? ' (you)' : ''}</strong><span class="muted tiny">${r.tasksDone} task${r.tasksDone === 1 ? '' : 's'} done</span>
+          <span class="b-bar"><i style="width:${r.points > 0 ? Math.max(4, Math.round(r.points / top * 100)) : 0}%"></i></span></span>
+        <strong class="b-pts ${r.points < 0 ? 'neg' : ''}">${pts(r.points)}</strong></li>`).join('')}</ol>`
+      : '<p class="muted">Nobody has an active goal yet.</p>';
+    const recent = d.recent.length ? `<section class="panel section"><h2>My recent points</h2><ul class="xp-log">${d.recent.map((e) => {
+      const ev = EV[e.type] || ['•', e.type];
+      return `<li><span>${ev[0]}</span><div class="q-main"><strong>${esc(e.note || ev[1])}</strong><span class="muted tiny">${esc(ev[1])} · ${esc(new Date(e.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }))}</span></div>
+        <strong class="${e.points < 0 ? 'neg' : 'pos'}">${fmtPts(e.points)}</strong></li>`;
+    }).join('')}</ul></section>` : '';
+    view.innerHTML = `${mine}
+      <section class="panel section"><div class="board-head"><h2>🏁 Leaderboard</h2><div class="seg" role="group" aria-label="Period">${seg}</div></div>
+        <p class="hint">Everyone with an active goal is listed. Equal points share a rank.</p>${list}</section>${recent}`;
   }
 
-  function feedCard(feed) {
-    return `<section class="panel section"><h2>📸 Partner activity</h2>
-      <p class="muted">Check their live photos. Look for the LIVE watermark and the matching code.</p>
-      <ul class="feed">${feed.map((f) => `<li>
-        <div class="feed-main"><strong>${esc(f.name)}</strong> · ${esc(f.activity)}<br>
-          <span class="muted">${esc(dayLabel(f.date))} · +${f.points}</span>
-          ${f.notes ? `<br><span class="muted">“${esc(f.notes)}”</span>` : ''}</div>
-        <div class="feed-side">${sourceBadge(f.source)} ${statusBadge(f.status)}
-          <button class="btn small ${f.canReview ? 'primary' : ''}" type="button" data-g="photo" data-id="${esc(f.completionId)}">${f.canReview ? 'Review photo' : 'View photo'}</button></div>
-      </li>`).join('')}</ul></section>`;
+  /* ================================================================ */
+  /* PARTNERS                                                         */
+  /* ================================================================ */
+  async function renderPartners(view, t) {
+    if (S.partnerId) return renderPartnerDetail(view, t);
+    loading(view);
+    let d;
+    try { d = await Api.call('acct.overview'); } catch (e) { if (t === token) failure(view, e); return; }
+    if (t !== token) return;
+    S.overview = d;
+    const incoming = d.incoming.map((x) => `<div class="row-card"><span>🤝 <strong>${esc(x.name)}</strong> wants to be accountability partners${x.note ? `<br><span class="muted">“${esc(x.note)}”</span>` : ''}</span>
+      <span class="row-actions"><button class="btn small primary" data-g="respond" data-id="${esc(x.partnershipId)}" data-accept="1" type="button">Accept</button>
+      <button class="btn small" data-g="respond" data-id="${esc(x.partnershipId)}" data-accept="0" type="button">Decline</button></span></div>`).join('');
+    const partners = d.partners.length ? `<ul class="plist">${d.partners.map((x) => `<li class="pcard">
+        <button type="button" class="pmain" data-g="open-partner" data-id="${esc(x.userId)}">
+          <span class="avatar sm">${esc(x.name.charAt(0).toUpperCase())}</span>
+          <span class="q-main"><strong>${esc(x.name)}</strong><span class="muted tiny">${pts(x.points)} pts · ${fmtPts(x.weekPoints)} this week${x.hasGoal ? '' : ' · no active goal'}</span>
+            ${x.onHold ? `<span class="tag lck">⏸ ${x.onHold} on hold</span>` : ''}</span><span class="chev" aria-hidden="true">›</span></button>
+        <button class="btn link tiny" type="button" data-g="end" data-id="${esc(x.partnershipId)}" data-name="${esc(x.name)}">End</button></li>`).join('')}</ul>`
+      : '<p class="muted">No partners yet. Send a request below. Partners see each other\'s progress and photos, and can flag tasks they doubt.</p>';
+    const waiting = d.outgoing.length ? `<h3 class="sub">Waiting for an answer</h3>${d.outgoing.map((x) => `<div class="row-card soft"><span>⏳ <strong>${esc(x.name)}</strong></span>
+      <button class="btn small" data-g="cancel-invite" data-id="${esc(x.partnershipId)}" type="button">Cancel</button></div>`).join('')}` : '';
+    view.innerHTML = `${incoming}
+      <section class="panel section"><h2>🤝 Accountability partners</h2>${partners}${waiting}</section>
+      <section class="panel section"><h2>Invite people</h2>${inviteForm(d.people)}</section>`;
+  }
+
+  function inviteForm(people) {
+    if (!people.length) return '<p class="muted">Everyone is already a partner or has a pending request. Ask your admin to add more users.</p>';
+    const f = S.filter.toLowerCase();
+    const shown = people.filter((p) => !f || p.name.toLowerCase().indexOf(f) !== -1 || p.userId.indexOf(f) !== -1);
+    const n = Object.keys(S.selected).length;
+    return `<p class="muted">Tick one or more people and send them a request.</p>
+      <div class="field"><label for="p-search">Search</label><input id="p-search" type="search" data-g-input="filter" placeholder="Type a name" value="${esc(S.filter)}" autocomplete="off"></div>
+      <ul class="pick" id="pick-list">${shown.map((p) => `<li><label class="pick-row"><input type="checkbox" data-g-check="${esc(p.userId)}" ${S.selected[p.userId] ? 'checked' : ''}>
+        <span class="avatar xs">${esc(p.name.charAt(0).toUpperCase())}</span><span class="q-main"><strong>${esc(p.name)}</strong><span class="muted tiny">${esc(p.userId)}${p.hasGoal ? '' : ' · no goal yet'}</span></span></label></li>`).join('') || '<li class="muted">No match.</li>'}</ul>
+      <div class="field"><label for="p-note">Message (optional)</label><input id="p-note" maxlength="120" placeholder="Let's keep each other honest"></div>
+      <p class="form-error" id="inv-error" role="alert"></p>
+      <button class="btn primary wide" type="button" data-g="send-invites" id="send-btn" ${n ? '' : 'disabled'}>${n ? `Send request to ${n} ${n === 1 ? 'person' : 'people'}` : 'Pick at least one person'}</button>
+      <p class="hint">Partners can see your goals, points and completion photos while you are partnered. Either of you can end it any time.</p>`;
+  }
+
+  function statusBadge(f) {
+    if (f.status === 'held') return '<span class="badge off">⏸ On hold</span>';
+    if (f.status === 'approved') return '<span class="badge ok">✅ Admin approved</span>';
+    if (f.status === 'rejected') return '<span class="badge off">✕ Admin rejected</span>';
+    if (f.status === 'verified') return '<span class="badge ok">👍 Looks good</span>';
+    return '<span class="badge">Not checked</span>';
+  }
+  const srcBadge = (s) => (s === 'live' ? '<span class="badge live">● Live camera</span>' : '<span class="badge warn">Camera app</span>');
+
+  async function renderPartnerDetail(view, t) {
+    loading(view);
+    let d;
+    try { d = await Api.call('acct.partner', { userId: S.partnerId }); } catch (e) { if (t === token) { S.partnerId = null; failure(view, e); } return; }
+    if (t !== token) return;
+    S.partnerData = d;
+    const st = d.stats;
+    const goals = d.goals.length ? d.goals.map((g) => `<div class="pgoal"><div class="goal-head"><div><h3>${esc(g.title)}</h3>
+        <p class="muted tiny">${esc(dayLabel(g.startDate))} → ${esc(dayLabel(g.endDate))}</p></div><span class="pl-pct">${g.counts.pct}%</span></div>
+      <div class="mini big"><i style="width:${g.counts.pct}%"></i></div>
+      <p class="pl-stats">${g.counts.completed} done · ${g.counts.missed} missed · ${g.counts.open} to go</p>
+      <ul class="act-list">${g.activities.map((a) => `<li><span class="q-icon">${areaIcon(a.areaKey)}</span><div class="q-main"><strong>${esc(a.name)}</strong>
+        <span class="muted tiny">${a.frequencyType === 'weekly' ? a.target + '× a week' : a.target + '× a month'}</span></div><span class="pl-mini">${a.counts.completed}/${a.counts.total}</span></li>`).join('')}</ul>
+      ${g.copyable ? `<button class="btn primary wide" type="button" data-g="copy-goal" data-id="${esc(g.goalId)}">📋 Copy this goal sheet</button>` : '<p class="hint">This goal was made with an older version and cannot be copied.</p>'}</div>`).join('') : '<p class="muted">No active goals.</p>';
+    const feed = d.feed.length ? `<ul class="feed">${d.feed.map((f) => `<li class="feed-item">
+        <div class="feed-main"><span class="q-icon">${areaIcon(f.areaKey)}</span><div class="q-main"><strong>${esc(f.name)}</strong>
+          <span class="muted tiny">${esc(dayLabel(f.date))} · ${fmtPts(f.points)}${f.taskStatus === 'floating' ? ' · floating' : ''}${f.taskStatus === 'locked' ? ' · last day' : ''}</span>
+          ${f.notes ? `<span class="muted tiny">“${esc(f.notes)}”</span>` : ''}${f.status === 'held' && f.reason ? `<span class="muted tiny">Flagged: “${esc(f.reason)}”</span>` : ''}</div></div>
+        <div class="feed-side">${srcBadge(f.source)} ${statusBadge(f)}
+          <button class="btn small ${f.canReview ? 'primary' : ''}" type="button" data-g="photo" data-id="${esc(f.completionId)}">${f.canReview ? 'Check photo' : 'View photo'}</button></div></li>`).join('')}</ul>`
+      : '<p class="muted">No completed tasks in the last 30 days.</p>';
+    view.innerHTML = `<div class="back-row"><button class="btn link" type="button" data-g="back">‹ All partners</button></div>
+      <section class="hero today-hero"><div class="hero-row"><div><div class="hero-name">${esc(d.partner.name)}</div><div class="hero-title">${st.weekDone}/${st.weekTotal} done this week</div></div>
+        <div class="score-pill static"><strong class="${st.points < 0 ? 'neg-on' : ''}">${pts(st.points)}</strong><span>points</span></div></div>
+        <div class="chips"><span class="chip">⚡ ${fmtPts(st.weekPoints)} this week</span><span class="chip">✅ ${st.tasksDone} done</span><span class="chip">⏰ ${st.missed} missed</span><span class="chip">📌 ${st.dueToday} due today</span></div></section>
+      <section class="panel section"><h2>Goals</h2>${goals}</section>
+      <section class="panel section"><h2>📸 Completed tasks</h2>
+        <p class="muted">Look for the LIVE watermark and the matching code. If something looks wrong, flag it: the task goes on hold and an admin decides.</p>${feed}</section>`;
   }
 
   async function viewPhoto(id) {
-    const item = cache.arena && cache.arena.feed.find((f) => f.completionId === id);
+    const item = S.partnerData && S.partnerData.feed.find((f) => f.completionId === id);
     if (!item) return;
     const m = openModal('<p class="loading"><span class="spinner"></span> Loading photo…</p>');
     try {
       const r = await Api.call('completions.photo', { completionId: id });
-      const checks = `<ul class="checklist">
-        <li>The banner says <strong>${item.source === 'live' ? 'LIVE PIC' : 'CAMERA APP PIC'}</strong> and shows code <strong class="code">${esc(item.code)}</strong></li>
-        <li>The date and time match when they say they did it</li>
-        <li>The photo shows the activity: <strong>${esc(item.activity)}</strong></li></ul>`;
-      m.set(`<h3 class="modal-title">${esc(item.name)} · ${esc(item.activity)}</h3>
+      const checks = `<ul class="checklist"><li>Banner says <strong>${item.source === 'live' ? 'LIVE PIC' : 'CAMERA APP PIC'}</strong> with code <strong class="code">${esc(item.code)}</strong></li>
+        <li>The date and time make sense</li><li>The photo shows: <strong>${esc(item.name)}</strong></li></ul>`;
+      m.set(`<h3 class="modal-title">${esc(S.partnerData.partner.name)} · ${esc(item.name)}</h3>
         <img class="shot" src="data:${r.mime};base64,${r.base64}" alt="Completion photo">
-        <p>${sourceBadge(item.source)} ${statusBadge(item.status)}</p>
-        ${item.canReview ? checks : ''}
+        <p>${srcBadge(item.source)} ${statusBadge(item)}</p>${item.canReview ? checks : ''}
         <p class="form-error" role="alert"></p>
-        <div class="modal-actions">
-          <button class="btn" type="button" data-m="close">Close</button>
-          ${item.canReview ? `<button class="btn danger" type="button" data-m="flagged">Not convincing</button>
-          <button class="btn primary" type="button" data-m="verified">✅ Verify</button>` : ''}
-        </div>`);
+        <div class="modal-actions stack-sm">
+          ${item.canReview ? '<button class="btn primary" type="button" data-m="verified">👍 Looks good</button><button class="btn danger" type="button" data-m="flag">⚠️ Flag this task</button>' : ''}
+          <button class="btn" type="button" data-m="close">Close</button></div>`);
       m.el.addEventListener('click', async (e) => {
         const b = e.target.closest('[data-m]');
         if (!b) return;
         if (b.dataset.m === 'close') return m.close();
-        if (b.dataset.m === 'flagged' && !confirm('Mark this photo as not convincing? Their points for it will be taken back.')) return;
+        let reason = '';
+        if (b.dataset.m === 'flag') {
+          m.wrap.hidden = true;
+          const a = await ask('Flag this task?', 'It goes on hold: no points for your partner until an admin approves or rejects it. Say what looks wrong.',
+            'Flag it', { input: 'Why do you doubt it?', required: true, placeholder: 'e.g. the photo is a screenshot' });
+          m.wrap.hidden = false;
+          if (!a) return;
+          reason = a.value;
+        }
         m.el.querySelectorAll('button').forEach((x) => { x.disabled = true; });
         try {
-          const res = await Api.call('completions.verify', { completionId: id, verdict: b.dataset.m });
+          const res = await Api.call('acct.review', { completionId: id, verdict: b.dataset.m === 'flag' ? 'flagged' : 'verified', reason });
           m.close();
-          toast(res.status === 'verified' ? 'Verified. You both earned bonus points!' : 'Photo marked as not accepted.', res.status === 'verified' ? 'success' : 'info');
-          renderArena($('#view'), ++token);
-          showAchievements(res.newAchievements);
+          toast(res.status === 'held' ? 'Flagged. The task is on hold until an admin decides.' : 'Marked as looks good.', res.status === 'held' ? 'info' : 'success');
+          renderPartnerDetail($('#view'), ++token);
         } catch (err) {
           m.el.querySelectorAll('button').forEach((x) => { x.disabled = false; });
           const p = m.el.querySelector('.form-error'); if (p) p.textContent = err.message;
         }
       });
-    } catch (e) { m.set(`<p class="status bad">${esc(e.message)}</p><div class="modal-actions"><button class="btn" data-m="close">Close</button></div>`); m.el.addEventListener('click', (ev) => { if (ev.target.closest('[data-m=close]')) m.close(); }); }
+    } catch (e) {
+      m.set(`<p class="status bad">${esc(e.message)}</p><div class="modal-actions"><button class="btn" data-m="close" type="button">Close</button></div>`);
+      m.el.addEventListener('click', (ev) => { if (ev.target.closest('[data-m=close]')) m.close(); });
+    }
   }
 
-  /* ================= TROPHIES ================= */
-  async function renderTrophies(view, t) {
+  /* ================================================================ */
+  /* REVIEWS (admin)                                                  */
+  /* ================================================================ */
+  async function renderReviews(view, t) {
     loading(view);
     let d;
-    try { d = await Api.call('game.trophies'); } catch (e) { if (t === token) failure(view, e); return; }
+    try { d = await Api.call('reviews.list'); } catch (e) { if (t === token) failure(view, e); return; }
     if (t !== token) return;
-    const h = d.hero, p = h.parts;
-    const got = d.achievements.filter((a) => a.unlockedAt);
-    const sorted = d.achievements.slice().sort((a, b) => (b.unlockedAt ? 1 : 0) - (a.unlockedAt ? 1 : 0) || (b.value / b.goal) - (a.value / a.goal));
-    const recentCut = Date.now() - 2 * 86400000;
-
-    view.innerHTML = `
-      ${heroCard(h)}
-      <section class="panel section">
-        <h2>How your level grows</h2>
-        <p class="muted">Level score = points + how regularly you show up + the size of your chart.</p>
-        <div class="formula">
-          <div><span>⭐ Points</span><strong>${num(p.points)}</strong></div><em>+</em>
-          <div><span>📅 Regularity<small>${h.activeDays} active days × 5</small></span><strong>${num(p.regularity)}</strong></div><em>+</em>
-          <div><span>📋 Chart<small>${h.activities} activities × 15 (max 20)</small></span><strong>${num(p.chart)}</strong></div><em>=</em>
-          <div class="total"><span>Level score</span><strong>${num(h.score)}</strong></div>
-        </div>
-      </section>
-      <section class="panel section">
-        <h2>🏅 Achievements <span class="muted">${got.length}/${d.achievements.length}</span></h2>
-        <div class="ach-grid">${sorted.map((a) => {
-          const isNew = a.unlockedAt && new Date(a.unlockedAt).getTime() > recentCut;
-          return `<div class="ach ${a.unlockedAt ? 'got' : ''}">
-            <span class="ach-ico">${esc(a.icon)}</span>${isNew ? '<span class="new-tag">NEW</span>' : ''}
-            <strong>${esc(a.name)}</strong><span class="muted">${esc(a.desc)}</span>
-            ${a.unlockedAt ? `<span class="pts">+${a.bonus}</span>` : `<div class="mini"><i style="width:${Math.round(a.value / a.goal * 100)}%"></i></div><span class="hint">${num(a.value)}/${num(a.goal)} · +${a.bonus} pts</span>`}</div>`;
-        }).join('')}</div>
-      </section>
-      <section class="panel section">
-        <h2>👑 Crown cabinet</h2>
-        ${d.crowns.length ? `<div class="chips">${d.crowns.map((c) => `<span class="chip">👑 Week of ${esc(dayLabel(c.weekKey))}${c.partner ? ' vs ' + esc(c.partner) : ''}</span>`).join('')}</div>`
-          : '<p class="muted">No crowns yet. Win a weekly duel against your partner to earn one.</p>'}
-      </section>
-      <section class="panel section">
-        <h2>Recent points</h2>
-        ${d.recent.length ? `<ul class="xp-log">${d.recent.map((e) => {
-          const ev = EV[e.type] || ['•', e.type];
-          return `<li><span>${ev[0]}</span><div class="q-main"><strong>${esc(e.note || ev[1])}</strong><span class="muted">${esc(ev[1])} · ${esc(new Date(e.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }))}</span></div><strong class="${e.points < 0 ? 'neg' : 'pos'}">${e.points > 0 ? '+' : ''}${e.points}</strong></li>`;
-        }).join('')}</ul>` : '<p class="muted">Complete a quest to see your points here.</p>'}
-      </section>`;
+    S.reviews = d;
+    const waiting = d.waiting.length ? d.waiting.map((c) => `<div class="review">
+        <div class="review-top"><span class="q-icon">${areaIcon(c.areaKey)}</span><div class="q-main"><strong>${esc(c.name)}</strong>
+          <span class="muted tiny">${esc(c.owner.name)} · ${esc(dayLabel(c.date))} · ${fmtPts(c.points)}</span></div>${srcBadge(c.source)}</div>
+        <p class="flagline">🚩 <strong>${esc(c.flaggedBy.name)}</strong> says: “${esc(c.reason)}”</p>
+        <div class="row-actions"><button class="btn small" type="button" data-g="rphoto" data-id="${esc(c.completionId)}">View photo</button>
+        ${c.owner.userId === d.me || c.flaggedBy.userId === d.me ? '<span class="muted tiny">You are involved, so another admin must decide.</span>'
+          : `<button class="btn small primary" type="button" data-g="resolve" data-d="approve" data-id="${esc(c.completionId)}">Approve</button>
+             <button class="btn small danger" type="button" data-g="resolve" data-d="reject" data-id="${esc(c.completionId)}">Reject</button>`}</div></div>`).join('')
+      : '<p class="muted">Nothing is waiting. 🎉</p>';
+    const decided = d.decided.length ? `<section class="panel section"><h2>Recently decided</h2><ul class="xp-log">${d.decided.map((c) => `<li><span>${c.status === 'approved' ? '✅' : '✕'}</span>
+      <div class="q-main"><strong>${esc(c.name)} · ${esc(c.owner.name)}</strong><span class="muted tiny">${c.status === 'approved' ? 'Approved' : 'Rejected'} by ${esc(c.resolvedBy)}${c.resolution ? ': “' + esc(c.resolution) + '”' : ''}</span></div></li>`).join('')}</ul></section>` : '';
+    view.innerHTML = `<section class="panel section"><h2>🔎 Flagged tasks</h2>
+      <p class="muted">Approve = the task counts and points are given. Reject = no points; the task re-opens if its window is still open, otherwise it is missed.</p>${waiting}</section>${decided}`;
   }
 
-  /* ================= events ================= */
+  async function reviewPhoto(id) {
+    const m = openModal('<p class="loading"><span class="spinner"></span> Loading photo…</p>');
+    try {
+      const r = await Api.call('completions.photo', { completionId: id });
+      m.set(`<h3 class="modal-title">Flagged photo</h3><img class="shot" src="data:${r.mime};base64,${r.base64}" alt="Completion photo">
+        <div class="modal-actions"><button class="btn" data-m="close" type="button">Close</button></div>`);
+    } catch (e) { m.set(`<p class="status bad">${esc(e.message)}</p><div class="modal-actions"><button class="btn" data-m="close" type="button">Close</button></div>`); }
+    m.el.addEventListener('click', (ev) => { if (ev.target.closest('[data-m=close]')) m.close(); });
+  }
+
+  /* ================================================================ */
+  /* Events                                                           */
+  /* ================================================================ */
   function wire(view) {
     if (wired) return;
     wired = true;
     view.addEventListener('click', onClick);
-    view.addEventListener('submit', onSubmit);
     view.addEventListener('change', onChange);
+    view.addEventListener('input', onInput);
   }
 
-  function refresh() { render(location.hash.replace(/^#\//, '') || 'dashboard', $('#view')); }
+  function refresh() { render(location.hash.replace(/^#\//, '') || 'today', $('#view')); }
 
-  async function onClick(e) {
-    const b = e.target.closest('[data-g]');
-    if (!b || b.tagName === 'SELECT') return;
-    const a = b.dataset.g;
-    try {
-      if (a === 'complete') return startComplete(b.dataset.id, b);
-      if (a === 'preset') {
-        const form = b.closest('form');
-        form.elements.activityName.value = b.dataset.name;
-        form.elements.activityName.dataset.key = slug(b.dataset.name);
-        return;
-      }
-      if (a === 'archive-goal') {
-        if (!confirm('Archive this goal? Its activities stop appearing as quests. Your points and history stay.')) return;
-        await Api.call('goals.archive', { goalId: b.dataset.id }); toast('Goal archived.', 'success'); return refresh();
-      }
-      if (a === 'archive-act') {
-        if (!confirm('Remove this activity? Your points and history stay.')) return;
-        await Api.call('activities.archive', { activityId: b.dataset.id }); return refresh();
-      }
-      if (a === 'respond') {
-        const r = await Api.call('partners.respond', { partnershipId: b.dataset.id, accept: b.dataset.accept === '1' });
-        toast(b.dataset.accept === '1' ? 'You are partners now!' : 'Invite declined.', 'success');
-        refresh(); return showAchievements(r.newAchievements);
-      }
-      if (a === 'revoke') {
-        if (!confirm('End this partnership? You will stop seeing each other\'s photos and duels.')) return;
-        await Api.call('partners.revoke', { partnershipId: b.dataset.id }); return refresh();
-      }
-      if (a === 'cheer' || a === 'nudge') {
-        b.disabled = true;
-        const r = await Api.call('cheers.send', { toUserId: b.dataset.to, kind: a, emoji: b.dataset.emoji });
-        toast(a === 'nudge' ? 'Nudge sent 👋' : 'Cheer sent ' + b.dataset.emoji + (r.earned ? ' (+' + r.earned + ' pt)' : ''), 'success');
-        b.disabled = false; return showAchievements(r.newAchievements);
-      }
-      if (a === 'photo') return viewPhoto(b.dataset.id);
-    } catch (err) { b.disabled = false; toast(err.message, 'error'); }
+  function updateSendButton() {
+    const btn = $('#send-btn');
+    if (!btn) return;
+    const n = Object.keys(S.selected).length;
+    btn.disabled = !n;
+    btn.textContent = n ? `Send request to ${n} ${n === 1 ? 'person' : 'people'}` : 'Pick at least one person';
   }
 
   function onChange(e) {
     const el = e.target;
-    const form = el.closest && el.closest('form[data-gform=activity]');
-    if (!form) return;
-    if (el.name === 'areaKey') fillPresets(form);
-    if (el.name === 'frequencyType') form.querySelector('[data-target]').hidden = el.value !== 'weekly';
+    if (el.dataset && el.dataset.gCheck) {
+      if (el.checked) S.selected[el.dataset.gCheck] = true; else delete S.selected[el.dataset.gCheck];
+      updateSendButton();
+    }
   }
 
-  async function onSubmit(e) {
-    const kind = e.target.dataset.gform;
-    if (!kind) return;
-    e.preventDefault();
-    const form = e.target;
-    const btn = form.querySelector('button[type=submit]');
-    const err = form.querySelector('.form-error') || $('#goal-error') || $('#inv-error');
-    if (err) err.textContent = '';
-    btn.disabled = true;
+  function onInput(e) {
+    const el = e.target;
+    if (el.dataset && el.dataset.gInput === 'filter') {
+      S.filter = el.value;
+      const people = (S.overview && S.overview.people) || [];
+      const f = S.filter.toLowerCase();
+      const shown = people.filter((p) => !f || p.name.toLowerCase().indexOf(f) !== -1 || p.userId.indexOf(f) !== -1);
+      $('#pick-list').innerHTML = shown.map((p) => `<li><label class="pick-row"><input type="checkbox" data-g-check="${esc(p.userId)}" ${S.selected[p.userId] ? 'checked' : ''}>
+        <span class="avatar xs">${esc(p.name.charAt(0).toUpperCase())}</span><span class="q-main"><strong>${esc(p.name)}</strong><span class="muted tiny">${esc(p.userId)}${p.hasGoal ? '' : ' · no goal yet'}</span></span></label></li>`).join('') || '<li class="muted">No match.</li>';
+    }
+  }
+
+  async function onClick(e) {
+    const b = e.target.closest('[data-g]');
+    if (!b || b.tagName === 'SELECT' || b.tagName === 'INPUT') return;
+    const a = b.dataset.g, view = $('#view');
     try {
-      if (kind === 'goal') {
-        const r = await Api.call('goals.create', { title: form.elements.title.value, durationMonths: form.elements.durationMonths.value });
-        toast('Goal created. Now add some activities!', 'success'); await refresh(); showAchievements(r.newAchievements);
-      } else if (kind === 'activity') {
-        const name = form.elements.activityName.value.trim();
-        const preset = (PRESETS[form.elements.areaKey.value] || []).indexOf(name) !== -1;
-        const r = await Api.call('activities.add', {
-          goalId: form.dataset.goal, areaKey: form.elements.areaKey.value, activityName: name,
-          activityKey: preset ? slug(name) : 'others', frequencyType: form.elements.frequencyType.value, target: form.elements.target.value
-        });
-        toast('Activity added.', 'success'); await refresh(); showAchievements(r.newAchievements);
-      } else if (kind === 'invite') {
-        await Api.call('partners.invite', { userId: form.elements.userId.value });
-        toast('Invite sent.', 'success'); refresh();
+      if (a === 'reload') return refresh();
+      if (a === 'complete') { b.disabled = true; await completeTask({ id: b.dataset.id, name: (S.today.due.find((x) => x.id === b.dataset.id) || {}).name || 'Task' }, async () => { await renderToday(view, ++token); }); b.disabled = false; return; }
+      if (a === 'period') { S.boardPeriod = b.dataset.v; return renderBoard(view, ++token); }
+      if (a === 'open-partner') { S.partnerId = b.dataset.id; window.scrollTo(0, 0); return renderPartners(view, ++token); }
+      if (a === 'back') { S.partnerId = null; S.partnerData = null; return renderPartners(view, ++token); }
+      if (a === 'photo') return viewPhoto(b.dataset.id);
+      if (a === 'rphoto') return reviewPhoto(b.dataset.id);
+      if (a === 'respond') {
+        await Api.call('acct.respond', { partnershipId: b.dataset.id, accept: b.dataset.accept === '1' });
+        toast(b.dataset.accept === '1' ? 'You are partners now!' : 'Request declined.', 'success'); return refresh();
       }
-    } catch (ex) { if (err) err.textContent = ex.message; }
-    finally { btn.disabled = false; }
+      if (a === 'cancel-invite') { await Api.call('acct.revoke', { partnershipId: b.dataset.id }); toast('Request cancelled.', 'info'); return refresh(); }
+      if (a === 'end') {
+        const ok = await ask('End partnership?', `You and ${b.dataset.name} will stop seeing each other's progress and photos.`, 'End it');
+        if (!ok) return;
+        await Api.call('acct.revoke', { partnershipId: b.dataset.id }); toast('Partnership ended.', 'info'); return refresh();
+      }
+      if (a === 'send-invites') {
+        const ids = Object.keys(S.selected);
+        if (!ids.length) return;
+        b.disabled = true;
+        const err = $('#inv-error'); if (err) err.textContent = '';
+        try {
+          const r = await Api.call('acct.invite', { userIds: ids, note: ($('#p-note') || {}).value || '' });
+          S.selected = {}; S.filter = '';
+          toast(r.sent.length ? `Request sent to ${r.sent.length} ${r.sent.length === 1 ? 'person' : 'people'}.` : 'No request was sent.', r.sent.length ? 'success' : 'error');
+          if (r.skipped.length) toast(`Skipped: ${r.skipped.map((s) => s.name).join(', ')}`, 'info');
+          return refresh();
+        } catch (ex) { if (err) err.textContent = ex.message; b.disabled = false; return; }
+      }
+      if (a === 'copy-goal') {
+        b.disabled = true;
+        try {
+          const tpl = await Api.call('acct.template', { goalId: b.dataset.id });
+          if (!window.Plan || !window.Plan.startFromTemplate) throw new Error('The goal wizard is not available.');
+          S.partnerId = null; S.partnerData = null;
+          await window.Plan.startFromTemplate(tpl);
+        } finally { b.disabled = false; }
+        return;
+      }
+      if (a === 'resolve') {
+        const approve = b.dataset.d === 'approve';
+        const r = await ask(approve ? 'Approve this task?' : 'Reject this task?',
+          approve ? 'The task counts and the points are given back.' : 'No points. The task re-opens if its window is still open, otherwise it is missed.',
+          approve ? 'Approve' : 'Reject', { input: 'Note (optional)', danger: approve ? false : true, placeholder: 'Shown to everyone involved' });
+        if (!r) return;
+        await Api.call('reviews.resolve', { completionId: b.dataset.id, decision: b.dataset.d, note: r.value });
+        toast(approve ? 'Approved.' : 'Rejected.', 'success'); return renderReviews(view, ++token);
+      }
+    } catch (err) { b.disabled = false; toast(err.message, 'error'); }
   }
 
   window.Game = { render: render };

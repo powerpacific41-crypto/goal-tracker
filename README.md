@@ -10,20 +10,19 @@ goal-tracker/
 ├── netlify.toml            Netlify settings (publishes /frontend, SPA fallback, security headers)
 ├── backend/
 │   ├── Code.gs             API router, schema, setup(), data helpers
-│   ├── Auth.gs             Phase 2: login, sessions, passwords, users, Google sign-in
-│   ├── Game.gs             Phase 3: goals, quests, points, levels, achievements, partners, duels, crowns
+│   ├── Auth.gs             Login, sessions, passwords, users, Google sign-in
+│   ├── Plan.gs             Goal wizard, floating calendar engine (Phases 4-5)
+│   ├── Game.gs             Phase 6: points ledger, completions with photo proof, Today, leaderboard
+│   ├── Accountability.gs   Phase 6: partners, photo review, flags, admin decisions, goal copy
 │   └── appsscript.json     Apps Script manifest (web app + scopes)
 └── frontend/
     ├── index.html          App shell
-    ├── css/styles.css      Mobile-first styles
-    ├── css/game.css        Phase 3 game styles (hero card, quests, arena, modals, camera)
-    └── js/
-        ├── config.js       Your Apps Script URL goes here
-        ├── api.js          API client (timeouts, error handling, session token)
-        ├── camera.js       Live in-app camera + "live pic" watermark (Phase 3)
-        ├── app.js          Login, role-based navigation, profile, users, system check
-        └── game.js         Phase 3 screens: Quests, Goals, Arena, Trophies
+    ├── css/                styles.css, game.css (Phase 6 screens), plan.css, mobile.css (phone polish)
+    └── js/                 config.js, api.js, camera.js, app.js (shell + navigation),
+                            game.js (Today, Board, Partners, Reviews, completion flow), plan.js (goals, calendar)
 ```
+
+---
 
 ---
 
@@ -137,10 +136,69 @@ All the numbers are in the `GAME` block at the top of `Game.gs`.
 A watermark added in the browser deters casual cheating but cannot prove authenticity, because someone determined could still edit an image. The one-time code, the live camera, and above all the partner's review are what make it hard to fake. If you ever need a stronger guarantee, the next step would be a native app with device attestation.
 
 ### Things to know
-- **Navigation:** the user menu is now Quests, Goals, Arena, Trophies, Profile. The unbuilt Calendar and Progress screens are left out of the menu for now (the routes still exist). Admin and developer menus are unchanged except that Quests and Goals now show real screens.
+- **Navigation:** the user menu is now Quests, Goals, Arena, Trophies, Profile. Calendar was added in Phase 5; Progress is still unbuilt and left out of the menu. Admin and developer menus are unchanged except that Quests and Goals now show real screens.
 - **Data model:** activities are rows in `ACTIVITIES`; each completion is a row in `COMPLETIONS`. `ACTIVITY_INSTANCES` (planned for the calendar phase) is not used yet.
 - **Privacy:** partners see each other's quest names, photos, level and weekly points while the partnership is accepted. Either person can end it at any time. Photos stay private in Drive and are only sent through the API to the owner and accepted partners.
 - **Speed:** each request reads whole sheets. That is fine for a few dozen users. If it gets slow, the tables can be cached or trimmed.
+
+## Phases 4 and 5: goal creation and the floating calendar
+
+Only two things were added: a new backend file (`backend/Plan.gs`) and a new frontend file pair (`frontend/js/plan.js`, `frontend/css/plan.css`). `Auth.gs`, `Game.gs` and `appsscript.json` are byte-for-byte unchanged. `Code.gs` got three small additive edits: the version number, four extra columns on `ACTIVITY_INSTANCES`, and registration of the new `plan.*` routes. `app.js` and `index.html` only gained the Calendar menu item and the script/stylesheet tags.
+
+### Upgrade an existing install
+
+1. In the Apps Script editor, replace the contents of `Code.gs` and add the new file `Plan.gs` (File, then the + next to Files, Script). Leave `Auth.gs` and `Game.gs` alone.
+2. Run `setup()` once. It adds the four new columns to `ACTIVITY_INSTANCES` and nothing else.
+3. Deploy, then Manage deployments, edit the existing deployment, New version, Deploy. The `/exec` URL stays the same.
+4. Redeploy the `frontend` folder to Netlify (drag and drop again).
+
+### What users get
+
+- **Goals, Create New Goal** is a 4-step wizard: (1) name and duration of 1 to 12 months, (2) start date with the end date calculated for you, (3) one or more life areas with their activities, frequency (weekly or monthly), target and extra fields, (4) a summary of everything with an Edit button that goes back without losing what you typed.
+- Life areas and activities: Health (Run, Workout, Step Count, Other), Social, Family, Career, Spiritual (Meditate asks for minutes per session, Give Charity for a monthly budget), Finance & Wealth (Save Money and Invest ask for a monthly amount). "Other" lets the user name the activity.
+- **Calendar** (new menu item). Month grid on wide screens, with activity cards you can drag to a valid day; on phones a compact grid with dots and a list for the selected day. Tap a card to Complete, Move to next available day, Move to another day, or view details.
+- **Goals** now shows completion percentage, completed, missed and to-go counts per goal and per activity.
+- Completing still uses the Phase 3 live photo and points; the calendar card is linked to that completion automatically. A completion made on the Quests screen is matched to the card that is due soonest the next time the calendar loads. If a partner rejects a photo, the card re-opens.
+
+### How floating works
+
+For a period (a calendar week Monday to Sunday, or a calendar month) with `k` instances of an activity and `n` days:
+
+- instance `i` (0 to k-1) starts on `periodStart + floor(i * n / k)`;
+- its latest allowed date is `periodEnd - (k - 1 - i)`, which always leaves a free day for every later instance, so floating can never make the rest of the period impossible.
+
+Example, 5 runs a week: latest dates are Wed, Thu, Fri, Sat, Sun. An open card rolls forward one day at a time (Mon, Tue, Wed). On its latest date it is **locked** (do it today, no more moves). The day after, if still open, it is **missed**. A card never leaves its week or month, and two cards of the same activity never share a day. Periods cut off by the goal's start or end get a proportional share of the target (at least one activity overall).
+
+Statuses: scheduled (future), pending (due today), floating (moved from its original day), locked, completed, missed.
+
+### Adding a life area or activity later
+
+Edit the `CATALOG` array at the top of `Plan.gs`. Nothing else changes: no schema change, no calendar change. Extra fields per activity are described in the `params` list of the catalog entry and are stored as JSON.
+
+### Limits (all in `PLAN` at the top of `Plan.gs`)
+
+4000 generated activities per goal, start date at most one year ahead, calendar ranges of at most 70 days per request. The Phase 3 limits (10 active goals, 30 activities in total) still apply.
+
+### Things to know
+
+- The old inline "New goal" form from Phase 3 is no longer shown on the Goals screen (the wizard replaces it). Goals made earlier still appear, but have no scheduled calendar cards because they were never generated.
+- Dates are the Apps Script project's time zone (`Asia/Dubai` in `appsscript.json`).
+- Rolling forward is done when the calendar or goals screen is opened, so no Apps Script triggers are needed.
+
+## Phases 4 and 5 test procedure
+
+Log in as a normal user, then:
+
+1. **Wizard validation.** Goals, Create New Goal. Next with no name shows "Give your goal a name". Pick 3 months, Next, choose a start date in the past: it is refused. Choose today: the end date shows the day before the same date 3 months later.
+2. **Activities.** Pick Health, Spiritual and Finance. Next with nothing switched on is refused. Switch on Run (5 per week), Meditate (leave minutes empty: refused, then enter 20), Give Charity (budget required), Save Money (amount required), and "Other" (name required).
+3. **Summary.** Step 4 lists duration, start and end date, areas, activities, frequency, targets, minutes, budget and amounts and how many activities will be scheduled. Edit goes back with your entries intact. Create goal.
+4. **Calendar.** You land on the month with the start date. Run appears 5 times in the first full week, evenly spread. Tap a card: the sheet shows the period, the latest date, and a list of days it may move to.
+5. **Moving.** Use Move to next available day. Then drag a Run card (desktop): only valid days highlight; dropping elsewhere does nothing. In the sheet, no date beyond the latest date is offered. A monthly activity (Save Money) can only move inside its own month.
+6. **Floating over time.** Leave a Run card alone for two days: it shows Floating, then Locked on its last allowed day, then Missed the day after, and cannot be moved.
+7. **Completing.** On a card due today, Complete, take the photo, Submit. The card turns green and Goals shows the percentage going up. The same activity completed from the Quests screen also ticks a card.
+8. **Safety.** Archive a goal from Goals (a confirmation appears; Cancel keeps it). Its cards disappear from the calendar. A second user never sees your cards.
+
+Automated checks used while building (not shipped): date maths for all 12 durations including month-end and leap years, 3000 random generation configurations, 400 day-by-day simulations with random completions and moves, and route tests against the real `.gs` files.
 
 ## Phase 3 test procedure
 
@@ -213,3 +271,45 @@ If a step fails, open **Executions** in the Apps Script editor to see the server
 - **Completion needs a photo:** a completion is rejected server-side unless it carries a photo. The file is saved privately in `Completion Photos` and linked through `COMPLETIONS.photoFileId`. `frontend/js/camera.js` captures and compresses the photo. The `Permissions-Policy` header now allows `camera=(self)`.
 - **Accountability partners:** rows in `ACCOUNTABILITY`. A request starts as `pending` and only the invited user can move it to `accepted` or `declined`; the requester can `revoke`. Partners see progress and photos only while status is `accepted`.
 - **Upgrading an existing install:** paste the new `Code.gs`, run `setup()` again (it adds the new sheet, folder, columns and settings without touching existing data), then deploy a new version.
+
+
+---
+
+## Phase 6: accountability, points and leaderboard
+
+### Upgrade (existing install)
+1. In Apps Script replace `Code.gs`, `Game.gs`, `Plan.gs` with the new files and add a new script file `Accountability.gs`. `Auth.gs` and `appsscript.json` are unchanged.
+2. Run **setup** once (safe to re-run). It adds the new columns to the COMPLETIONS and CHALLENGES sheets.
+3. **Deploy > Manage deployments > Edit > New version > Deploy**.
+4. Upload the new `frontend` folder to Netlify.
+
+Notes on old data: the Phase 3 game layer (levels, crowns, achievements, cheers, duels) is no longer used and its sheets are left untouched. Completions made before Phase 6 have no task id and score nothing. The completion call now takes `instanceId` instead of `activityId`.
+
+### Points (all rules live in the `GAME` block at the top of `Game.gs`)
+| Event | Points |
+|---|---|
+| Health, Finance & Wealth, Career task | 2 base |
+| Any other area | 1 base |
+| Floating task completed | base + 50% |
+| Locked task (last allowed day) completed | base only |
+| Task never completed | -5 (the total may go below zero) |
+| 100% of a week's weekly tasks | + tasks x 0.25 |
+| 100% of a month's tasks | + tasks x 0.5 |
+| 100% of all tasks in a goal | + tasks x 1 |
+
+Points are a ledger that corrects itself: every point has a key, the server works out what each key should be worth now, and only the differences are written. Holds, approvals, rejections and re-opened tasks therefore adjust the total automatically, and nothing is ever counted twice. Archived goals are frozen.
+
+### Accountability
+- **Partners** tab: tick one or more registered users and send a request. They accept or decline. Accepted partners see each other's goals, points, the last 30 days of completed tasks and the completion photos.
+- **Check photo**: the partner sees the photo with its LIVE watermark and code. **Looks good** verifies it. **Flag** needs a reason and puts the task **on hold**: no points, and it does not count toward 100% bonuses.
+- **Reviews** (admin, under More): approve = the task counts and points return; reject = no points, and the task re-opens if its window is still open, otherwise it counts as missed. The task's owner and the flagger cannot decide their own case.
+- **Copy this goal sheet**: opens the goal wizard prefilled from a partner's goal. Money amounts are never copied; you enter your own.
+
+### Leaderboard
+Everyone signed in can see it. Only users with an active goal are listed. Periods: all time, this month, this week. Equal points share a rank.
+
+### Phone use
+Bottom navigation (5 slots, extra pages under **More**), bottom-sheet dialogs, 44px+ tap targets, 16px inputs (no iOS zoom), safe-area padding for notched phones.
+
+### Verification
+The backend was tested end to end against a mock of Apps Script that loads the real `.gs` files, and the screens were exercised in a simulated browser. It has not yet been run against real Google services, so do a quick pass after deploying: create two users, make a goal each, partner them, complete a task, flag it, approve it as admin.

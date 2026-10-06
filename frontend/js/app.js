@@ -2,38 +2,40 @@
 // Navigation is data-driven so later phases only add entries, not new plumbing.
 // Security note: this file only controls what is SHOWN. The server checks every request.
 (function () {
+  // Items flagged more:true live in the "More" sheet on phones (the bar holds 5 slots). Wide screens list them all.
   const NAV = {
     user: [
-      { id: 'dashboard', label: 'Quests', icon: '🎮' },
+      { id: 'today', label: 'Today', icon: '🏠' },
       { id: 'goals', label: 'Goals', icon: '🎯' },
-      { id: 'arena', label: 'Arena', icon: '⚔️' },
-      { id: 'trophies', label: 'Trophies', icon: '🏆' },
-      { id: 'profile', label: 'Profile', icon: '👤' }
+      { id: 'calendar', label: 'Calendar', icon: '📅' },
+      { id: 'partners', label: 'Partners', icon: '🤝' },
+      { id: 'board', label: 'Board', icon: '🏆' }
     ],
     admin: [
-      { id: 'dashboard', label: 'Quests', icon: '🎮' },
-      { id: 'users', label: 'Users', icon: '👥' },
+      { id: 'today', label: 'Today', icon: '🏠' },
       { id: 'goals', label: 'Goals', icon: '🎯' },
-      { id: 'reports', label: 'Reports', icon: '📊' },
-      { id: 'profile', label: 'Profile', icon: '👤' }
+      { id: 'calendar', label: 'Calendar', icon: '📅' },
+      { id: 'board', label: 'Board', icon: '🏆' },
+      { id: 'partners', label: 'Partners', icon: '🤝', more: true },
+      { id: 'reviews', label: 'Reviews', icon: '🔎', more: true },
+      { id: 'users', label: 'Users', icon: '👥', more: true }
     ],
     developer: [
       { id: 'system', label: 'System', icon: '🛠️' },
       { id: 'users', label: 'Users', icon: '👥' },
       { id: 'goals', label: 'Goals', icon: '🎯' },
-      { id: 'activities', label: 'Activities', icon: '🧩' },
-      { id: 'testing', label: 'Testing', icon: '🧪' },
-      { id: 'logs', label: 'Logs', icon: '📜' },
-      { id: 'profile', label: 'Profile', icon: '👤' }
+      { id: 'activities', label: 'Activities', icon: '🧩', more: true },
+      { id: 'testing', label: 'Testing', icon: '🧪', more: true },
+      { id: 'logs', label: 'Logs', icon: '📜', more: true }
     ]
   };
 
-  // Screens drawn by game.js (Phase 3). Calendar and Progress are folded into Quests and Trophies for now.
-  const GAME_ROUTES = ['dashboard', 'goals', 'arena', 'trophies'];
+  // Screens drawn by game.js (Phase 6): Today, Board, Partners, Reviews.
+  const GAME_ROUTES = ['today', 'board', 'partners', 'reviews'];
+  // plan.js: goal creation wizard, goals with progress, floating calendar.
+  const PLAN_ROUTES = ['goals', 'calendar'];
 
-  const PHASE_FOR = {
-    calendar: 'Phase 5', progress: 'Phase 6', reports: 'Phase 6', activities: 'Phase 7', testing: 'Phase 7', logs: 'Phase 7'
-  };
+  const PHASE_FOR = { activities: 'a later phase', testing: 'a later phase', logs: 'a later phase' };
 
   // Which roles an account may create / manage (mirrors the server rule).
   const MANAGES = { developer: ['admin', 'user'], admin: ['user'], user: [] };
@@ -100,21 +102,45 @@
 
   function renderTopbar() {
     $('#who').textContent = state.user.name;
+    $('#profile-btn').setAttribute('aria-label', 'Profile of ' + state.user.name);
     $('#preview-wrap').hidden = state.user.role !== 'developer';
   }
 
   function renderNav() {
     const items = NAV[effectiveRole()];
-    $('#nav').innerHTML = items
-      .map((n) => `<a href="#/${n.id}" data-id="${n.id}"><span class="ni" aria-hidden="true">${n.icon || ''}</span><span>${esc(n.label)}</span></a>`)
-      .join('');
+    const main = items.filter((n) => !n.more);
+    const more = items.filter((n) => n.more);
+    const link = (n, cls) => `<a href="#/${n.id}" data-id="${n.id}"${cls ? ' class="' + cls + '"' : ''}><span class="ni" aria-hidden="true">${n.icon || ''}</span><span>${esc(n.label)}</span></a>`;
+    $('#nav').innerHTML = main.map((n) => link(n)).join('')
+      + more.map((n) => link(n, 'wide-only')).join('')
+      + (more.length ? '<button type="button" class="more-btn" data-id="__more" aria-haspopup="dialog"><span class="ni" aria-hidden="true">⋯</span><span>More</span></button>' : '');
     highlightNav();
   }
 
   function highlightNav() {
+    if (!state.user) return;
     const current = currentRoute();
+    const items = NAV[effectiveRole()];
+    const inMore = items.some((n) => n.more && n.id === current);
     document.querySelectorAll('#nav a').forEach((a) => {
       a.toggleAttribute('aria-current', a.dataset.id === current);
+    });
+    const mb = document.querySelector('#nav .more-btn');
+    if (mb) mb.toggleAttribute('aria-current', inMore);
+    const pb = $('#profile-btn');
+    if (pb) pb.toggleAttribute('aria-current', current === 'profile');
+  }
+
+  function openMore() {
+    if (!window.GT.ui) return;
+    const items = NAV[effectiveRole()].filter((n) => n.more);
+    const m = window.GT.ui.openModal(`<h3 class="modal-title">More</h3>
+      <div class="more-list">${items.map((n) => `<a class="more-item" href="#/${n.id}"><span class="ni">${n.icon}</span><span>${esc(n.label)}</span></a>`).join('')}
+      <a class="more-item" href="#/profile"><span class="ni">👤</span><span>Profile &amp; password</span></a>
+      <button type="button" class="more-item" data-m="logout"><span class="ni">🚪</span><span>Log out</span></button></div>`);
+    m.el.addEventListener('click', (e) => {
+      if (e.target.closest('a.more-item')) m.close();
+      else if (e.target.closest('[data-m=logout]')) { m.close(); logout(); }
     });
   }
 
@@ -135,7 +161,7 @@
       return showForcedChange();
     }
     const items = NAV[user.role];
-    if (!items.some((n) => n.id === currentRoute())) location.hash = '#/' + items[0].id;
+    if (currentRoute() !== 'profile' && !items.some((n) => n.id === currentRoute())) location.hash = '#/' + items[0].id;
     renderNav();
     render();
   }
@@ -282,6 +308,7 @@
     if (route === 'profile') return renderProfile(view);
     if (route === 'system' && role === 'developer') return renderSystem(view);
     if (route === 'users' && MANAGES[role].length) return renderUsers(view);
+    if (PLAN_ROUTES.indexOf(route) !== -1 && NAV[effectiveRole()].some((n) => n.id === route) && window.Plan) return window.Plan.render(route, view);
     if (GAME_ROUTES.indexOf(route) !== -1 && NAV[effectiveRole()].some((n) => n.id === route) && window.Game) return window.Game.render(route, view);
     const item = NAV[effectiveRole()].find((n) => n.id === route);
     view.innerHTML = placeholder(item ? item.label : 'Not found', PHASE_FOR[route] || 'a later phase');
@@ -501,10 +528,11 @@
     });
 
     $('#logout-btn').addEventListener('click', logout);
+    $('#nav').addEventListener('click', (e) => { if (e.target.closest('.more-btn')) openMore(); });
     $('#preview-role').addEventListener('change', (e) => {
       state.previewRole = e.target.value || null;
       const items = NAV[effectiveRole()];
-      if (!items.some((n) => n.id === currentRoute())) location.hash = '#/' + items[0].id;
+      if (currentRoute() !== 'profile' && !items.some((n) => n.id === currentRoute())) location.hash = '#/' + items[0].id;
       renderNav();
       render();
     });

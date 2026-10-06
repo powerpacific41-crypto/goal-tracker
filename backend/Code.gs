@@ -1,7 +1,8 @@
 /**
  * GOAL TRACKER - Google Apps Script backend
  * Phase 1: project structure, schema, Drive/Sheets bootstrap, API router.
- * Phase 3 (game layer) lives in Game.gs; its sheets and routes are registered here.
+ * Game.gs (points, completing tasks, Today, leaderboard), Plan.gs (goals + calendar) and Accountability.gs
+ * (partners, flagging, admin reviews, copying a partner's goal) register their routes here.
  *
  * Run setup() ONCE from the editor, then deploy as a Web App.
  * The browser only ever talks to doPost()/doGet(); Sheet and Drive IDs
@@ -9,7 +10,7 @@
  */
 
 var APP = {
-  VERSION: '0.3.0-phase3',
+  VERSION: '0.6.0-phase6',
   ROOT_FOLDER: 'GOAL TRACKER',
   SUBFOLDERS: ['Database', 'User Data', 'Goals', 'Reports', 'Completion Photos'],
   DB_NAME: 'Goal Tracker DB'
@@ -25,20 +26,27 @@ var SCHEMA = {
   GOALS: ['goalId', 'userId', 'title', 'durationMonths', 'startDate', 'endDate', 'status', 'createdDate'],
   GOAL_AREAS: ['goalAreaId', 'goalId', 'areaKey'],
   ACTIVITIES: ['activityDefId', 'goalId', 'userId', 'areaKey', 'activityKey', 'activityName', 'frequencyType', 'target', 'params', 'createdDate'],
+  // Phase 5 (Plan.gs): activityDefId links a card to its ACTIVITIES row, originalDate is where the engine first
+  // put it, movedCount counts manual moves, completionId links the COMPLETIONS row that proves it.
   ACTIVITY_INSTANCES: ['activityId', 'goalId', 'userId', 'activityName', 'category', 'frequency', 'target',
-    'periodStart', 'periodEnd', 'assignedDate', 'latestDate', 'status', 'completedDate', 'completionNotes'],
+    'periodStart', 'periodEnd', 'assignedDate', 'latestDate', 'status', 'completedDate', 'completionNotes',
+    'activityDefId', 'originalDate', 'movedCount', 'completionId'],
   ACTIVITY_LOG: ['logId', 'timestamp', 'userId', 'level', 'action', 'details'],
   // photoFileId points to a PRIVATE Drive file in 'Completion Photos'. A completed row must have one.
   COMPLETIONS: ['completionId', 'activityId', 'goalId', 'userId', 'scheduledDate', 'completedDate', 'status', 'notes',
     'photoFileId', 'photoTakenAt', 'photoMime', 'photoSizeKb',
-    // Phase 3 (game): points earned, how the photo was captured (live | camera-app), the one-time code
-    // printed on the photo, and the partner's verdict. status: done | verified | flagged
-    'points', 'photoSource', 'challengeCode', 'verifiedBy', 'verifiedAt'],
+    // points earned, how the photo was captured (live | camera-app), the one-time code printed on the photo.
+    // status: done | verified (a partner said it looks fine) | held (a partner flagged it, no points until an admin decides)
+    //         | approved (admin kept it, points given) | rejected (admin refused it, the task re-opens) | flagged (old Phase 3 value)
+    'points', 'photoSource', 'challengeCode', 'verifiedBy', 'verifiedAt',
+    // Phase 6: the task (ACTIVITY_INSTANCES row) it completes, the task's status when it was completed (pending |
+    // scheduled | floating | locked), base points, and the flag / admin-review trail.
+    'instanceId', 'taskStatus', 'basePoints', 'flaggedBy', 'flaggedAt', 'flagReason', 'resolvedBy', 'resolvedAt', 'resolution'],
   // status: pending | accepted | declined | revoked. goalId empty = partner for all of requester's goals.
   ACCOUNTABILITY: ['partnershipId', 'requesterId', 'partnerId', 'goalId', 'status', 'requestedDate', 'respondedDate', 'note'],
   SESSIONS: ['sessionId', 'userId', 'role', 'tokenHash', 'createdAt', 'expiresAt', 'revoked'],
   SETTINGS: ['key', 'value', 'description'],
-  // Phase 3 (game). GAME_EVENTS is the points ledger: XP, weekly duels and levels are all sums over it.
+  // GAME_EVENTS is the points ledger (see Game.gs). Phase 3 rows (crowns, achievements, cheers ...) are kept but no longer counted.
   GAME_EVENTS: ['eventId', 'userId', 'type', 'points', 'refId', 'dateKey', 'weekKey', 'createdAt', 'note'],
   ACHIEVEMENTS: ['userId', 'achievementKey', 'unlockedAt'],
   // One row per partnership per finished week (Monday to Sunday). winnerId is a userId or 'tie'.
@@ -276,9 +284,18 @@ function getRoutes_() {
     'users.setStatus':     { roles: STAFF, handler: routeUsersSetStatus_ },
     'users.resetPassword': { roles: STAFF, handler: routeUsersResetPassword_ }
   };
-  // Phase 3: goals, quests, points, achievements, partners, arena (handlers in Game.gs)
+  // Phase 6: Today, completing tasks, points, leaderboard (handlers in Game.gs)
   var game = getGameRoutes_();
   Object.keys(game).forEach(function (k) { routes[k] = { roles: ALL, handler: game[k] }; });
+  // Phase 6: accountability partners, flagging, copying a partner's goal (Accountability.gs)
+  var acct = getAcctRoutes_();
+  Object.keys(acct).forEach(function (k) { routes[k] = { roles: ALL, handler: acct[k] }; });
+  // Phase 6: admin review of flagged tasks (staff only)
+  var staff = getStaffRoutes_();
+  Object.keys(staff).forEach(function (k) { routes[k] = { roles: STAFF, handler: staff[k] }; });
+  // Phases 4-5: goal wizard, activity generation, floating calendar (handlers in Plan.gs)
+  var plan = getPlanRoutes_();
+  Object.keys(plan).forEach(function (k) { routes[k] = { roles: ALL, handler: plan[k] }; });
   return routes;
 }
 

@@ -10,13 +10,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/game.css">
+  <link rel="stylesheet" href="css/plan.css">
+  <link rel="stylesheet" href="css/mobile.css">
 </head>
 <body>
   <div class="shell">
     <header class="topbar">
       <a class="brand" href="#/">Goal Tracker</a>
       <div id="user-area" class="user-area" hidden>
-        <span id="who" class="who"></span>
+        <a id="profile-btn" class="profile-btn" href="#/profile"><span class="pi" aria-hidden="true">👤</span><span id="who" class="who"></span></a>
         <label id="preview-wrap" class="preview" hidden>
           <span class="muted">Preview as</span>
           <select id="preview-role">
@@ -25,7 +27,7 @@
             <option value="user">User</option>
           </select>
         </label>
-        <button id="logout-btn" class="btn small" type="button">Log out</button>
+        <button id="logout-btn" class="btn small logout-top" type="button">Log out</button>
       </div>
     </header>
 
@@ -39,5 +41,6 @@
   <script src="js/camera.js"></script>
   <script src="js/app.js"></script>
   <script src="js/game.js"></script>
+  <script src="js/plan.js"></script>
 </body>
 </html>

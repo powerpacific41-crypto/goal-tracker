@@ -1,0 +1,80 @@
+/* ---------- Phase 6: phone-first polish ---------- */
+body.modal-open { overflow: hidden; }
+html { -webkit-text-size-adjust: 100%; }
+button, a, summary, label, select { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+
+/* every control is at least 44px tall, inputs are 16px so iOS does not zoom */
+.btn { min-height: 44px; }
+.btn.small { min-height: 38px; padding: 7px 14px; }
+.btn.link, .btn.tiny { min-height: 36px; }
+.field input, .field select, .field textarea, input[type=search], select { font-size: 16px; min-height: 46px; }
+.field textarea { width: 100%; font: inherit; font-size: 16px; padding: 11px 12px; border-radius: 10px; border: 1px solid var(--line); resize: vertical; }
+input[type=checkbox] { accent-color: var(--primary); }
+
+/* compact topbar with Profile shortcut */
+.profile-btn { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 4px 10px; border-radius: 999px; background: rgba(255,255,255,.12); color: #fff; text-decoration: none; min-width: 0; }
+.profile-btn[aria-current] { background: rgba(255,255,255,.28); }
+.profile-btn .who { max-width: 38vw; color: #fff; font-weight: 600; }
+.user-area .logout-top { display: none; }
+.preview span.muted { display: none; }
+
+/* bottom bar */
+.nav a, .nav .more-btn { min-height: 56px; }
+.nav .more-btn {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  border: 0; background: none; font: inherit; font-size: .78rem; font-weight: 600; color: var(--muted); cursor: pointer;
+}
+.nav .more-btn .ni { font-size: 1.25rem; line-height: 1; }
+.nav .more-btn[aria-current] { color: var(--primary); box-shadow: inset 0 3px 0 var(--accent); }
+.nav .wide-only { display: none; }
+.nav a, .nav .more-btn { min-width: 0; }
+
+/* sheets */
+.more-list { display: grid; gap: 8px; }
+.more-item { display: flex; align-items: center; gap: 14px; min-height: 56px; padding: 10px 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); text-decoration: none; font: 600 1rem var(--font-body); text-align: left; cursor: pointer; width: 100%; }
+.more-item .ni { font-size: 1.4rem; width: 1.6em; text-align: center; }
+
+/* phones: modals slide up as bottom sheets */
+@media (max-width: 640px) {
+  .view { padding: 12px 12px 20px; }
+  .panel { padding: 16px; border-radius: 16px; }
+  .modal-backdrop { place-items: end center; padding: 0; }
+  .modal {
+    max-width: none; width: 100%; max-height: 92vh; max-height: 92dvh;
+    border-radius: 22px 22px 0 0; padding: 18px 16px calc(18px + env(safe-area-inset-bottom, 0px));
+    animation: sheet .24s ease;
+  }
+  .modal::before { content: ''; display: block; width: 40px; height: 4px; margin: -6px auto 12px; border-radius: 2px; background: var(--line); }
+  .modal-actions { flex-direction: column-reverse; align-items: stretch; }
+  .modal-actions .btn { width: 100%; }
+  .modal-actions.stack-sm { flex-direction: column; }
+  .pl-sheet-actions .btn { width: 100%; }
+  .toasts { bottom: calc(var(--nav-h) + 12px + env(safe-area-inset-bottom, 0px)); }
+  .hero { padding: 16px; border-radius: 18px; }
+  .score-pill strong { font-size: 1.45rem; }
+  .feed-side .btn { width: 100%; margin-left: 0; }
+  .row-card { align-items: stretch; }
+  .row-card .row-actions .btn { flex: 1; }
+  .board li { grid-template-columns: 30px 1fr auto; padding: 10px 8px; }
+  .table-wrap { margin: 0 -4px; }
+}
+@keyframes sheet { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+@media (max-width: 380px) {
+  .nav a, .nav .more-btn { font-size: .7rem; }
+  .profile-btn .who { display: none; }
+}
+
+/* wide screens: all items in the side rail, no More button, logout in the top bar */
+@media (min-width: 900px) {
+  .nav .wide-only { display: flex; }
+  .nav .more-btn { display: none; }
+  .user-area .logout-top { display: inline-block; }
+  .profile-btn .who { max-width: 240px; }
+  .modal-backdrop { place-items: center; }
+  .modal { border-radius: 18px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal { animation: none; }
+}
