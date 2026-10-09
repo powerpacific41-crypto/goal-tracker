@@ -13,9 +13,12 @@
   <meta name="apple-mobile-web-app-title" content="Goals">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Goal Tracker</title>
+  <link rel="preconnect" href="https://script.google.com">
+  <link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <noscript><link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet"></noscript>
   <link rel="stylesheet" href="css/styles.css">
   <link rel="stylesheet" href="css/game.css">
   <link rel="stylesheet" href="css/plan.css">
@@ -26,6 +29,7 @@
     <header class="topbar">
       <a class="brand" href="#/">Goal Tracker</a>
       <div id="user-area" class="user-area" hidden>
+        <button id="bell-btn" class="bell-btn" type="button" aria-label="Notifications"><span aria-hidden="true">🔔</span><span id="bell-count" class="bell-count" hidden>0</span></button>
         <a id="profile-btn" class="profile-btn" href="#/profile"><span class="pi" aria-hidden="true">👤</span><span id="who" class="who"></span></a>
         <label id="preview-wrap" class="preview" hidden>
           <span class="muted">Preview as</span>
@@ -50,6 +54,7 @@
   <script src="js/app.js"></script>
   <script src="js/game.js"></script>
   <script src="js/plan.js"></script>
+  <script src="js/notify.js"></script>
   <script>
     if ("serviceWorker" in navigator) window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });
   </script>

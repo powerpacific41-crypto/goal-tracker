@@ -313,3 +313,44 @@ Bottom navigation (5 slots, extra pages under **More**), bottom-sheet dialogs, 4
 
 ### Verification
 The backend was tested end to end against a mock of Apps Script that loads the real `.gs` files, and the screens were exercised in a simulated browser. It has not yet been run against real Google services, so do a quick pass after deploying: create two users, make a goal each, partner them, complete a task, flag it, approve it as admin.
+
+---
+
+## Install on your phone (PWA)
+
+The frontend is an installable web app: it has a manifest, icons and a service worker. Netlify serves it over HTTPS, which is required.
+
+- **Android (Chrome):** open the site, log in, go to **Profile**, tap **Install on this phone**. Or use the browser's **⋮ menu > Install app**.
+- **iPhone (Safari only):** open the site, tap **Share > Add to Home Screen > Add**.
+
+Notes:
+- The app opens full screen from the home screen with its own icon.
+- Pages, scripts and styles are fetched fresh when online, so updates and a changed `API_URL` arrive immediately. The saved copy is only used offline, and data always comes live from the backend (no offline task completion).
+- After you redeploy the frontend, close and reopen the installed app once to pick up the update.
+- The live camera needs HTTPS and camera permission. Allow it the first time you complete a task. On iPhone, an installed app asks again after each reinstall.
+
+### Icon badge
+The installed app shows the number of tasks due today on its icon (it updates when you open the app, finish a task, or return to it). Android shows a number or a dot depending on the launcher. iPhone (iOS 16.4+) asks for permission: open **Profile** in the installed app and tap **Allow icon badge**. It cannot update while the app is closed, because that needs push notifications.
+
+### Speed
+- The app opens instantly from saved files and shows the last saved Today screen (marked "Updating…") while fresh data loads. New code appears from the next open after a redeploy; a changed `API_URL` applies at once.
+- Opening no longer waits for the session check, and the duplicate Today request was removed.
+- Apps Script has a cold start of a few seconds after it has been idle. To avoid it, add a free uptime monitor (for example UptimeRobot or cron-job.org) that opens your `/exec` URL every 5 minutes.
+
+## Phase 7: notifications
+
+The bell in the top bar shows an unread count and opens a list. You get a notification when:
+- an accountability partner completes a task (and a bigger one when they finish a whole goal),
+- someone new is added to the app (everyone except the person who added them),
+- someone climbs to #1 on the leaderboard (everyone; the new leader and the one overtaken get their own wording; a tie or the very first leader does not notify).
+
+They are in-app: the app checks when it is opened, when you return to it and about every 75 seconds while it is on screen. A closed app cannot be reached without a push service (see below).
+
+### Upgrade (existing install)
+1. Apps Script: replace `Code.gs`, `Auth.gs`, `Game.gs`, add the new `Notifications.gs`.
+2. Run `setup()` once (creates the `NOTIFICATIONS` sheet; existing data is untouched).
+3. Deploy > Manage deployments > edit > **New version** > Deploy.
+4. GitHub: upload `frontend/js/notify.js` and the changed `index.html`, `js/app.js`, `css/mobile.css`, `sw.js`.
+5. Reload the app twice (the first load refreshes the cached shell). Old notifications are pruned automatically after 1500 rows.
+
+Phone push while the app is closed is possible later via FCM or ntfy.sh, but needs extra setup.

@@ -151,6 +151,7 @@
 
   /* ---------- session lifecycle ---------- */
   function enter(user) {
+    try { localStorage.setItem('gt_user', JSON.stringify(user)); } catch (e) { /* optional */ }
     state.user = user;
     state.previewRole = null;
     $('#preview-role').value = '';
@@ -164,9 +165,14 @@
     if (currentRoute() !== 'profile' && !items.some((n) => n.id === currentRoute())) location.hash = '#/' + items[0].id;
     renderNav();
     render();
+    if (currentRoute() !== 'today') refreshBadge();   // the Today screen sets it itself
+    if (window.GT && GT.notify) GT.notify.start();
   }
 
   function leave(message) {
+    setBadge(0);
+    if (window.GT && GT.notify) GT.notify.stop();
+    try { localStorage.removeItem('gt_user'); Object.keys(localStorage).forEach((k) => { if (k.indexOf('gt_today_') === 0) localStorage.removeItem(k); }); } catch (e) { /* ignore */ }
     Api.clearToken();
     state.user = null;
     state.previewRole = null;
@@ -314,13 +320,35 @@
     view.innerHTML = placeholder(item ? item.label : 'Not found', PHASE_FOR[route] || 'a later phase');
   }
 
+  /* --- icon badge: number of tasks due today (installed app; the browser may ignore it) --- */
+  function setBadge(n) {
+    try {
+      if (!('setAppBadge' in navigator)) return;
+      if (n > 0) navigator.setAppBadge(n); else navigator.clearAppBadge();
+    } catch (e) { /* badges are optional */ }
+  }
+  async function refreshBadge() {
+    if (!state.user || state.user.mustChangePassword) return;
+    try { const d = await Api.call('today.get'); setBadge(d.due.length); } catch (e) { /* keep the old number */ }
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshBadge(); });
+  function badgeCard() {
+    if (!('setAppBadge' in navigator)) return '';
+    const needs = typeof Notification !== 'undefined' && Notification.permission === 'default' && isStandalone();
+    return `<p class="muted" style="margin-top:12px">The app icon shows how many tasks are due today.${needs ? ' Your phone needs your permission for this.' : ''}</p>${needs ? '<button class="btn" type="button" data-action="badge-permission">Allow icon badge</button>' : ''}`;
+  }
+  async function askBadgePermission() {
+    try { await Notification.requestPermission(); } catch (e) { /* ignored */ }
+    refreshBadge(); render();
+  }
+
   /* --- installing the app on a phone --- */
   let installEvent = null;
   window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvent = e; if (state.user && currentRoute() === 'profile') render(); });
   window.addEventListener('appinstalled', () => { installEvent = null; toast('App installed. Open it from your home screen.', 'success'); if (state.user) render(); });
   const isStandalone = () => (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
   function installCard() {
-    if (isStandalone()) return '<section class="panel section"><h2>Installed</h2><p class="muted">You are using the installed app.</p></section>';
+    if (isStandalone()) return '<section class="panel section"><h2>Installed</h2><p class="muted">You are using the installed app.</p>' + badgeCard() + '</section>';
     const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
     const how = installEvent
       ? '<button class="btn primary" type="button" data-action="install">Install on this phone</button>'
@@ -526,7 +554,7 @@
   }
 
   // Shared helpers for game.js
-  window.GT = { state: state, esc: esc, toast: toast, fmtDate: fmtDate };
+  window.GT = { state: state, esc: esc, toast: toast, fmtDate: fmtDate, setBadge: setBadge, refreshBadge: refreshBadge };
 
   /* ---------- boot ---------- */
   async function boot() {
@@ -547,6 +575,7 @@
       if (a === 'logout') logout();
       else if (a === 'unlink-google') unlinkGoogle();
       else if (a === 'install') doInstall();
+      else if (a === 'badge-permission') askBadgePermission();
       else if (a === 'reset') resetUser(b.dataset.id);
       else if (a === 'toggle') toggleUser(b.dataset.id, b.dataset.status);
     });
@@ -564,6 +593,20 @@
     window.addEventListener('gt:session-expired', () => { if (state.user) leave('Your session has ended. Please log in again.'); });
 
     if (!Api.getToken()) return showLogin();
+    // Open instantly from the last saved profile, then confirm the session in the background.
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem('gt_user')); } catch (e) { /* none */ }
+    if (saved && saved.userId && !saved.mustChangePassword) {
+      enter(saved);
+      Api.call('auth.me').then((r) => {
+        const changed = !state.user || state.user.role !== r.user.role || state.user.name !== r.user.name;
+        try { localStorage.setItem('gt_user', JSON.stringify(r.user)); } catch (e) { /* optional */ }
+        if (r.user.mustChangePassword) return enter(r.user);
+        state.user = r.user;
+        if (changed) { renderTopbar(); renderNav(); render(); }
+      }).catch((e) => { if (e.code !== 'NETWORK' && e.code !== 'TIMEOUT' && e.code !== 'NOT_CONFIGURED' && state.user) leave('Your session has ended. Please log in again.'); });
+      return;
+    }
     $('#view').innerHTML = '<p class="loading"><span class="spinner"></span> Loading…</p>';
     setAuthMode(true);
     try {

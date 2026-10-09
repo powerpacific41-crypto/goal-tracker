@@ -100,6 +100,7 @@
       const res = await reviewAndSubmit(photo, task, begin, info);
       celebrate(res, task);
       if (done) await done(res);
+      if (window.GT.refreshBadge) window.GT.refreshBadge();
     } catch (e) {
       if (e.code !== 'CANCELLED') toast(e.message, 'error');
     }
@@ -203,16 +204,40 @@
       <div class="mini"><i style="width:${pct}%"></i></div></div>`;
   }
 
+  const localDay = () => { const n = new Date(); return n.getFullYear() + '-' + pad(n.getMonth() + 1) + '-' + pad(n.getDate()); };
+  const todayKey = () => 'gt_today_' + (state.user ? state.user.userId : '');
+  function readTodayCache() {
+    try { const c = JSON.parse(localStorage.getItem(todayKey())); return c && c.day === localDay() && c.data && c.data.due ? c.data : null; } catch (e) { return null; }
+  }
+  function saveTodayCache(d) { try { localStorage.setItem(todayKey(), JSON.stringify({ day: localDay(), data: d })); } catch (e) { /* storage is optional */ } }
+
+  // Shows the last saved screen at once, then replaces it with fresh data.
   async function renderToday(view, t) {
-    loading(view);
+    const cached = readTodayCache();
+    if (cached) paintToday(view, cached, true); else loading(view);
     let d;
-    try { d = await Api.call('today.get'); } catch (e) { if (t === token) failure(view, e); return; }
+    try { d = await Api.call('today.get'); } catch (e) {
+      if (t !== token) return;
+      if (cached) { toast('Could not refresh. Showing your last saved view.', 'info'); view.querySelector('.stale-note') && view.querySelector('.stale-note').remove(); } else failure(view, e);
+      return;
+    }
     if (t !== token) return;
+    saveTodayCache(d);
+    paintToday(view, d, false);
+  }
+
+  function paintToday(view, d, stale) {
     S.today = d; state.rules = d.rules;
+    if (window.GT.setBadge) window.GT.setBadge(d.due.length);
+    paintTodayBody(view, d);
+    if (stale) view.insertAdjacentHTML('afterbegin', '<div class="stale-note" role="status"><span class="spinner"></span> Updating…</div>');
+  }
+
+  function paintTodayBody(view, d) {
     const R = d.rules;
     const banners = [];
     if (d.incomingInvites) banners.push(`<a class="banner-link" href="#/partners">🤝 ${d.incomingInvites} partner request${d.incomingInvites > 1 ? 's' : ''} waiting →</a>`);
-    if (d.reviewsWaiting) banners.push(`<a class="banner-link" href="#/reviews">🔎 ${d.reviewsWaiting} flagged task${d.reviewsWaiting > 1 ? 's' : ''} need a decision →</a>`);
+    if (d.reviewsWaiting) banners.push(`<a class="banner-link" href="#/reviews">🔎 ${d.reviewsWaiting} flagged task${d.reviewsWaiting > 1 ? 's need' : ' needs'} a decision →</a>`);
 
     const hero = `<section class="hero today-hero">
       <div class="hero-row"><div><div class="hero-name">Hi ${esc(d.name.split(' ')[0])} 👋</div><div class="hero-title">${esc(dayLabel(d.today))}</div></div>

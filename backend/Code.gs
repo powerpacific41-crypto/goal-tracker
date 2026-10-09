@@ -10,7 +10,7 @@
  */
 
 var APP = {
-  VERSION: '0.6.0-phase6',
+  VERSION: '0.7.0-phase7',
   ROOT_FOLDER: 'GOAL TRACKER',
   SUBFOLDERS: ['Database', 'User Data', 'Goals', 'Reports', 'Completion Photos'],
   DB_NAME: 'Goal Tracker DB'
@@ -53,7 +53,9 @@ var SCHEMA = {
   CROWNS: ['crownId', 'partnershipId', 'weekKey', 'userA', 'userB', 'scoreA', 'scoreB', 'winnerId', 'duoReached', 'settledAt'],
   CHEERS: ['cheerId', 'fromId', 'toId', 'kind', 'emoji', 'refId', 'createdAt', 'seenAt'],
   // Short-lived one-time codes that get printed on completion photos (proof the photo is fresh).
-  CHALLENGES: ['code', 'userId', 'activityId', 'createdAt', 'expiresAt', 'used']
+  CHALLENGES: ['code', 'userId', 'activityId', 'createdAt', 'expiresAt', 'used'],
+  // Phase 7 (Notifications.gs): one row per person per notification. readAt empty = unread.
+  NOTIFICATIONS: ['notificationId', 'userId', 'type', 'title', 'body', 'link', 'createdAt', 'readAt']
 };
 
 var DEFAULT_SETTINGS = [
@@ -290,6 +292,9 @@ function getRoutes_() {
   // Phase 6: accountability partners, flagging, copying a partner's goal (Accountability.gs)
   var acct = getAcctRoutes_();
   Object.keys(acct).forEach(function (k) { routes[k] = { roles: ALL, handler: acct[k] }; });
+  // Phase 7: in-app notifications (Notifications.gs)
+  var ntf = getNotifyRoutes_();
+  Object.keys(ntf).forEach(function (k) { routes[k] = { roles: ALL, handler: ntf[k], allowWhileMustChange: false }; });
   // Phase 6: admin review of flagged tasks (staff only)
   var staff = getStaffRoutes_();
   Object.keys(staff).forEach(function (k) { routes[k] = { roles: STAFF, handler: staff[k] }; });

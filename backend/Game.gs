@@ -294,6 +294,7 @@ function settleNoLock_(userIds, today) {
   var w = settleCompute_(userIds, today);
   planSave_(w.L, w.dirty);
   planAppendMany_('GAME_EVENTS', w.events);
+  if (w.events.length) leaderCheck_();
   return { L: w.L, today: today };
 }
 
@@ -526,6 +527,9 @@ function submitCompletion_(p, me) {
     if (e.userId === me && String(e.type).indexOf('bonus_') === 0 && ts_(e.createdAt) >= stamp) breakdown.push({ label: e.note, points: Number(e.points) || 0 });
   });
 
+  var goalDone = readAll_('GAME_EVENTS').some(function (e) { return e.userId === me && e.type === 'bonus_goal' && ts_(e.createdAt) >= stamp; });
+  var goalRow = findRow_('GOALS', 'goalId', r.goalId);
+  notifyTaskDone_(me, r.activityName, pts.total, goalDone, goalRow ? goalRow.obj.title : '');
   log_('INFO', 'completions.submit', r.activityName + ' +' + pts.total, me);
   return {
     completionId: id, taskStatus: taskStatus, breakdown: breakdown, earned: round2_(after - before),

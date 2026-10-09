@@ -78,3 +78,24 @@ input[type=checkbox] { accent-color: var(--primary); }
 @media (prefers-reduced-motion: reduce) {
   .modal { animation: none; }
 }
+
+/* photo previews never push the buttons off screen */
+.shot { max-height: 40vh; max-height: 40dvh; }
+.row-card { margin-bottom: 12px; }
+
+/* quick-open: last saved screen while fresh data loads */
+.stale-note { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; padding: 6px 12px; border-radius: 999px; width: max-content; background: var(--surface); border: 1px solid var(--line); color: var(--muted); font-size: .82rem; }
+.stale-note .spinner { width: 14px; height: 14px; border-width: 2px; }
+
+/* ---- notifications ---- */
+.bell-btn { position: relative; width: 40px; height: 40px; border: 0; border-radius: 999px; background: rgba(255,255,255,.12); color: #fff; font-size: 18px; cursor: pointer; display: inline-grid; place-items: center; }
+.bell-count { position: absolute; top: -2px; right: -2px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: #e4572e; color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
+.bell-count[hidden] { display: none; }
+.ntf-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ntf-head .modal-title { margin: 0; }
+.ntf-list { list-style: none; margin: 12px 0 0; padding: 0; max-height: 60vh; overflow-y: auto; }
+.ntf-item { display: flex; gap: 12px; width: 100%; padding: 12px; border: 0; border-bottom: 1px solid var(--line); background: none; text-align: left; font: inherit; color: inherit; cursor: pointer; min-height: 56px; }
+.ntf-item.unread { background: rgba(232,163,23,.12); }
+.ntf-ic { font-size: 22px; }
+.ntf-tx { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ntf-empty { padding: 20px 8px; text-align: center; }

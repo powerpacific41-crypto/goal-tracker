@@ -387,6 +387,7 @@ function routeUsersCreate_(p, ctx) {
     if (findRow_('USERS', 'userId', userId)) throw new ApiError('USERNAME_TAKEN', 'That username is already taken.');
     var temp = createUserRow_(userId, name, role);
     log_('INFO', 'users.create', 'Created ' + userId + ' (' + role + ')', ctx.user.userId);
+    if (role === 'user') notifyNewUser_(userId, name, ctx.user.userId);
     return { user: publicUser_(findRow_('USERS', 'userId', userId).obj), tempPassword: temp };
   } finally {
     lock.releaseLock();
